@@ -55,7 +55,7 @@ class Simulator {
 		this.config = config;
 		const integrationParameters = new RawIntegrationParameters();
 		integrationParameters.dt = config.physics.timeStep;
-        integrationParameters.numSolverIterations = 64;
+		integrationParameters.numSolverIterations = 64;
 		this.world = new RAPIER.World(
 			{ x: 0, y: -9.81, z: 0 },
 			integrationParameters,

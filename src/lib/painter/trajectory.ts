@@ -123,12 +123,12 @@ export class TrajectoryPainter {
 			for (let i = 0; i < trajectories.objectBalls.length; i++) {
 				this.drawTrajetory(
 					trajectories.objectBalls[i],
-					{ r: 0, g: 125, b: 255 },
+					{ r: 255, g: 125, b: 125 },
 					scale,
 					showOutline,
 				);
 
-				context.shadowColor = "rgba(0, 125, 255, 0.8)";
+				context.shadowColor = "rgba(255, 125, 125, 0.8)";
 				context.drawImage(this.prepassCanvasHandle.canvas, 0, 0);
 			}
 		});

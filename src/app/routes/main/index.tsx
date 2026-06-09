@@ -198,14 +198,21 @@ function Main() {
 					);
 					context.stroke();
 
-					context.strokeStyle = "cyan";
-					context.lineWidth = width * 0.001;
-					context.beginPath();
-					for (const point of result.table.approximation.hulls) {
-						context.lineTo(point.x * protoToCanvasX, point.y * protoToCanvasY);
+					context.strokeStyle = "rgb(0, 255, 255, 0.8)";
+					context.lineWidth = width * 0.01;
+					for (const point of result.table.approximation.lines) {
+						context.beginPath();
+						context.moveTo(
+							point.start.x * protoToCanvasX,
+							point.start.y * protoToCanvasY,
+						);
+						context.lineTo(
+							point.end.x * protoToCanvasX,
+							point.end.y * protoToCanvasY,
+						);
+
+						context.stroke();
 					}
-					context.closePath();
-					context.stroke();
 
 					if (result.table.transform) {
 						context.strokeStyle = "red";
