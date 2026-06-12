@@ -941,7 +941,7 @@ function Main() {
 							className={styles.controlVisibilityButton}
 							onClick={() => setIsControlUiHidden((prev) => !prev)}
 						>
-							{isControlUiHidden ? "UI \ud45c\uc2dc" : "UI \uc228\uae40"}
+							{isControlUiHidden ? "UI 표시" : "UI 숨김"}
 						</button>
 					)}
 					{!isControlUiHidden && (
