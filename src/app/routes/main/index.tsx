@@ -3,6 +3,8 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
 	argmin,
 	dist,
+	exportCanvasToPNG,
+	exportGPUTextureToPNG,
 	measure,
 	rerange,
 	restoreMat,
@@ -15,7 +17,7 @@ import hyperparams from "@/config/hyperparams";
 import useDebugCanvas from "@/hooks/use-debug-canvas";
 import useGPUCanvas from "@/hooks/use-gpu-canvas";
 import type { FrameInfo } from "@/lib/capture";
-import Cuebit from "@/lib/cuebit";
+import Cuebit, { type BufferSet, type FrameResult } from "@/lib/cuebit";
 import logger from "@/lib/logger";
 import { device, onnx } from "@/lib/onnx";
 import {
@@ -127,10 +129,12 @@ function Main() {
 	const [isOverlayEnabled, setIsOverlayEnabled] = useState(false);
 	const [isControlUiHidden, setIsControlUiHidden] = useState(false);
 
+	const isExportFrameRef = useRef(false);
+
 	const loop = useEffectEvent(
-		async (
-			source: HTMLVideoElement,
-			cuebit: Cuebit,
+		(
+			result: FrameResult,
+			bufferSet: BufferSet,
 			simulator: Simulator,
 			trajectoryDrawerCanvas: CanvasHandle<"2d">,
 			overlayCanvas: CanvasHandle<"webgpu">,
@@ -147,17 +151,9 @@ function Main() {
 				return;
 			}
 
-			const result = await measure(
-				() => cuebit.process(source),
-				"Process Frame",
-			);
-
-			const bufferIndex = cuebit.getCurrentBufferIndex();
-			const buffer = cuebit.getBuffer(bufferIndex);
-
-			drawTexture(resizedFrameDebugCanvas, buffer.resizedFrameTexture);
-			drawTexture(tableMaskDebugCanvas, buffer.tableMaskFrameTexture);
-			drawTexture(cueMaskDebugCanvas, buffer.cueMaskFrameTexture);
+			drawTexture(resizedFrameDebugCanvas, bufferSet.resizedFrameTexture);
+			drawTexture(tableMaskDebugCanvas, bufferSet.tableMaskFrameTexture);
+			drawTexture(cueMaskDebugCanvas, bufferSet.cueMaskFrameTexture);
 
 			detectionDebugCanvas.draw((context, width, height) => {
 				const protoToCanvasX =
@@ -494,6 +490,53 @@ function Main() {
 		},
 	);
 
+	const exportFrameData = useEffectEvent(
+		(
+			overlayCanvas: CanvasHandle<"webgpu">,
+			resizedFrameDebugCanvas: CanvasHandle<"webgpu">,
+			tableMaskDebugCanvas: CanvasHandle<"webgpu">,
+			cueMaskDebugCanvas: CanvasHandle<"webgpu">,
+			detectionDebugCanvas: CanvasHandle<"2d">,
+			normalizedTableDebugCanvas: CanvasHandle<"2d">,
+			trajectoryDebugCanvas: CanvasHandle<"2d">,
+		) => {
+			resizedFrameDebugCanvas.draw((device, context, _width, _height) => {
+				exportGPUTextureToPNG(
+					device,
+					context.getCurrentTexture(),
+					"resized_frame.png",
+				);
+			});
+			tableMaskDebugCanvas.draw((device, context, _width, _height) => {
+				exportGPUTextureToPNG(
+					device,
+					context.getCurrentTexture(),
+					"table_mask.png",
+				);
+			});
+			cueMaskDebugCanvas.draw((device, context, _width, _height) => {
+				exportGPUTextureToPNG(
+					device,
+					context.getCurrentTexture(),
+					"cue_mask.png",
+				);
+			});
+			exportCanvasToPNG(detectionDebugCanvas.canvas, "detection_result.png");
+			exportCanvasToPNG(
+				normalizedTableDebugCanvas.canvas,
+				"normalized_detection_result.png",
+			);
+			exportCanvasToPNG(trajectoryDebugCanvas.canvas, "trajectory.png");
+			overlayCanvas.draw((device, context, _width, _height) => {
+				exportGPUTextureToPNG(
+					device,
+					context.getCurrentTexture(),
+					"trajectory_overlay.png",
+				);
+			});
+		},
+	);
+
 	useEffect(() => {
 		if (!cameraVideoRef.current) {
 			return;
@@ -654,13 +697,21 @@ function Main() {
 				const trajectoryPainter = new TrajectoryPainter(2844, 1422);
 
 				let busy = false;
-				const tick = () => {
+				const tick = async () => {
 					if (ac.signal.aborted) return;
+
 					if (!busy) {
 						busy = true;
+
+						const result = await measure(
+							() => cuebit.process(video),
+							"Process Frame",
+						);
+						const bufferIndex = cuebit.getCurrentBufferIndex();
+						const buffetSet = cuebit.getBuffer(bufferIndex);
 						loop(
-							video,
-							cuebit,
+							result,
+							buffetSet,
 							simulator,
 							trajectoryDrawerCanvas,
 							overlayCanvas,
@@ -672,9 +723,21 @@ function Main() {
 							detectionDebugCanvas,
 							normalizedTableDebugCanvas,
 							trajectoryDebugCanvas,
-						).finally(() => {
-							busy = false;
-						});
+						);
+						busy = false;
+					}
+
+					if (isExportFrameRef.current) {
+						exportFrameData(
+							overlayCanvas,
+							resizedFrameDebugCanvas,
+							tableMaskDebugCanvas,
+							cueMaskDebugCanvas,
+							detectionDebugCanvas,
+							normalizedTableDebugCanvas,
+							trajectoryDebugCanvas,
+						);
+						isExportFrameRef.current = false;
 					}
 					video.requestVideoFrameCallback(tick);
 				};
@@ -894,6 +957,36 @@ function Main() {
 					)}
 				</div>
 			</div>
+
+			{/* 디버깅용 중간 이미지 Export */}
+			{import.meta.env.DEV && (
+				<div
+					style={{
+						position: "absolute",
+						width: "auto",
+						height: "auto",
+						left: "24px",
+						bottom: "24px",
+					}}
+				>
+					<button
+						style={{
+							width: "auto",
+							height: "auto",
+							padding: "8px 16px",
+							borderRadius: "8px",
+							fontWeight: "800",
+							cursor: "pointer",
+						}}
+						type="button"
+						onClick={() => {
+							isExportFrameRef.current = true;
+						}}
+					>
+						Export
+					</button>
+				</div>
+			)}
 
 			{/* 개발용 로그 패널 (개발 환경에서만 표시) */}
 			{/* <DevLog /> */}

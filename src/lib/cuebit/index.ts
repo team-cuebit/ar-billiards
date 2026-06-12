@@ -14,10 +14,33 @@ import resizeShader from "./shaders/resize.wgsl";
  */
 export type BufferIndex = 0 | 1;
 
+export type FrameResult = {
+	readonly table:
+		| {
+				transform: {
+					quad: Quad<"fetch">;
+					matrix: {
+						transform: MatSnapshot;
+						inverseTransform: MatSnapshot;
+					};
+				};
+				approximation: TableApproximation;
+		  }
+		| {
+				approximation: TableApproximation;
+				transform?: undefined;
+		  }
+		| null;
+	readonly ballPoints: Vector2<"fetch">[];
+	readonly cue: {
+		approximation: CueApproximation;
+	} | null;
+};
+
 /**
  * 한 프레임 추론에 필요한 버퍼 세트
  */
-interface BufferSet {
+export interface BufferSet {
 	readonly resizePipeline: GPUComputePipeline;
 	readonly preprocessPipeline: GPUComputePipeline;
 	/**
@@ -230,6 +253,18 @@ function findTableQuad(
 		const y1 = Math.min(height, Math.ceil(cy + hh));
 		const roi = track(src.roi(new cv.Rect(x0, y0, x1 - x0, y1 - y0)));
 
+		// 마스크의 작은 구멍(빵꾸)을 메움: morphological closing (팽창 후 침식).
+		// 구멍이 컨투어를 끊어 잘못된 변이 잡히는 것을 방지.
+		const closeSize =
+			(Math.max(3, Math.round(Math.min(roi.rows, roi.cols) * 0.03)) | 1) >>> 0;
+		const kernel = track(
+			cv.getStructuringElement(
+				cv.MORPH_ELLIPSE,
+				new cv.Size(closeSize, closeSize),
+			),
+		);
+		cv.morphologyEx(roi, roi, cv.MORPH_CLOSE, kernel);
+
 		const contours = track(new cv.MatVector());
 		cv.findContours(
 			roi,
@@ -256,245 +291,221 @@ function findTableQuad(
 		let points:
 			| [Vector2<"fetch">, Vector2<"fetch">, Vector2<"fetch">, Vector2<"fetch">]
 			| null = null;
-		// 디버깅용: 검출된 선분의 끝점들
+		// 디버깅용: 피팅된 4개의 변(직선)
 		const lines: Line<"fetch">[] = [];
 		if (maxIdx >= 0) {
-			// 무한직선을 위의 두 점(start, end)으로 표현. 방향은 end-start로 유도.
-			const lineDir = (l: Line<"fetch">) => ({
-				px: l.start.x,
-				py: l.start.y,
-				vx: l.end.x - l.start.x,
-				vy: l.end.y - l.start.y,
-			});
-
-			// 1) 가장 큰 컨투어의 외곽선만 그린 엣지 이미지 생성 (노이즈 블롭 제외).
-			const edge = track(cv.Mat.zeros(roi.rows, roi.cols, cv.CV_8UC1));
-			cv.drawContours(edge, contours, maxIdx, new cv.Scalar(255), 1);
-
-			// 2) HoughLinesP로 당구대 변의 "가시 구간"을 직선 선분으로 검출.
-			//    꼭짓점이 가려져도 변 자체는 직선 선분으로 검출되므로,
-			//    뒤에서 직선을 교차시켜 가려진 꼭짓점을 복원할 수 있음.
+			const contour = contours.get(maxIdx);
 			const tableScale = Math.min(roi.rows, roi.cols);
-			const linesMat = track(new cv.Mat());
-			cv.HoughLinesP(
-				edge,
-				linesMat,
-				// rho(px), theta(rad) 해상도
-				1,
-				Math.PI / 180,
-				// threshold: 직선으로 인정할 최소 투표 수 (튜닝값)
-				Math.floor(tableScale * 0.01),
-				// minLineLength: 너무 짧은 선분은 노이즈로 간주 (튜닝값)
-				tableScale * 0.15,
-				// maxLineGap: 변 위의 끊긴 구간을 이어붙이는 허용 간격 (튜닝값)
-				tableScale * 0.1,
-			);
 
-			// region 중심을 ROI 좌표계로 변환 (변을 상/하/좌/우로 나누는 기준점)
-			const ccx = cx - x0;
-			const ccy = cy - y0;
+			// 점, 그리고 점 + 단위방향으로 표현한 무한직선 (ROI 좌표계, 내부 계산용)
+			type P = { x: number; y: number };
+			type ILine = { px: number; py: number; vx: number; vy: number };
 
-			type Seg = {
-				x1: number;
-				y1: number;
-				x2: number;
-				y2: number;
-				mx: number;
-				my: number;
-				ang: number;
-				len: number;
-			};
-			const segs: Seg[] = [];
-			for (let i = 0; i < linesMat.rows; i++) {
-				const x1 = linesMat.data32S[i * 4];
-				const y1 = linesMat.data32S[i * 4 + 1];
-				const x2 = linesMat.data32S[i * 4 + 2];
-				const y2 = linesMat.data32S[i * 4 + 3];
-				const dx = x2 - x1;
-				const dy = y2 - y1;
-				const len = Math.hypot(dx, dy);
-
-				lines.push({
-					start: { x: x1 + x0, y: y1 + y0 },
-					end: { x: x2 + x0, y: y2 + y0 },
-				});
-				if (len < 1e-3) {
-					continue;
-				}
-				// 방향각을 [0, π)로 정규화 (선분은 방향이 없으므로 180° 주기)
-				let ang = Math.atan2(dy, dx);
-				if (ang < 0) {
-					ang += Math.PI;
-				}
-				segs.push({
-					x1,
-					y1,
-					x2,
-					y2,
-					mx: (x1 + x2) / 2,
-					my: (y1 + y2) / 2,
-					ang,
-					len,
+			// contour 점들을 배열로 추출
+			const cpts: P[] = [];
+			for (let i = 0; i < contour.rows; i++) {
+				cpts.push({
+					x: contour.data32S[i * 2],
+					y: contour.data32S[i * 2 + 1],
 				});
 			}
 
-			// 중심 기준 부호 오프셋(off)을 함께 들고 다니는 선분
-			// off의 절댓값 = "중심에서 얼마나 바깥쪽인지" → 안쪽 선분을 거를 때 사용
-			type GSeg = Seg & { off: number };
-			// groups[0,1]: ref와 평행한 두 변 / groups[2,3]: 수직인 두 변
-			const groups: [GSeg[], GSeg[], GSeg[], GSeg[]] = [[], [], [], []];
-
-			if (segs.length > 0) {
-				// 가장 긴 선분의 방향을 기준 방향(ref)으로 사용.
-				let ref = 0;
-				let maxLen = -1;
-				for (const s of segs) {
-					if (s.len > maxLen) {
-						maxLen = s.len;
-						ref = s.ang;
-					}
+			// total least squares 직선 피팅
+			const tlsFit = (pts: P[]): ILine | null => {
+				if (pts.length < 2) {
+					return null;
 				}
-				const ux = Math.cos(ref);
-				const uy = Math.sin(ref);
-
-				// [0, π) 원형 거리
-				const circDist = (a: number, b: number) => {
-					const d = Math.abs(a - b) % Math.PI;
-					return Math.min(d, Math.PI - d);
-				};
-
-				for (const s of segs) {
-					let idx: number;
-					let off: number;
-					if (circDist(s.ang, ref) < Math.PI / 4) {
-						// ref와 평행한 변(예: 상/하) → ref 법선 방향 부호로 둘로 분리
-						off = (s.mx - ccx) * -uy + (s.my - ccy) * ux;
-						idx = off >= 0 ? 0 : 1;
-					} else {
-						// ref와 수직인 변(예: 좌/우) → ref 방향 부호로 둘로 분리
-						off = (s.mx - ccx) * ux + (s.my - ccy) * uy;
-						idx = off >= 0 ? 2 : 3;
-					}
-					groups[idx].push({ ...s, off });
-				}
-			}
-
-			// 가중치 붙은 점 (선분 길이를 가중치로 사용)
-			type WPoint = { x: number; y: number; w: number };
-
-			// 3) 각 변에 속한 점들로 가중 직선 피팅 (total least squares).
-			const fitLine = (pts: WPoint[]): Line<"fetch"> | null => {
-				let W = 0;
 				let mx = 0;
 				let my = 0;
 				for (const p of pts) {
-					W += p.w;
-					mx += p.w * p.x;
-					my += p.w * p.y;
+					mx += p.x;
+					my += p.y;
 				}
-				if (W <= 0 || pts.length < 2) {
-					return null;
-				}
-				mx /= W;
-				my /= W;
-
+				mx /= pts.length;
+				my /= pts.length;
 				let sxx = 0;
 				let sxy = 0;
 				let syy = 0;
 				for (const p of pts) {
 					const dx = p.x - mx;
 					const dy = p.y - my;
-					sxx += p.w * dx * dx;
-					sxy += p.w * dx * dy;
-					syy += p.w * dy * dy;
+					sxx += dx * dx;
+					sxy += dx * dy;
+					syy += dy * dy;
 				}
 				// 2x2 공분산행렬의 주축(최대 고유벡터) 방향
 				const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-				// 무게중심(start)과 주축 방향 단위벡터만큼 떨어진 점(end)으로 직선 표현
-				return {
-					start: { x: mx, y: my },
-					end: { x: mx + Math.cos(theta), y: my + Math.sin(theta) },
-				};
+				return { px: mx, py: my, vx: Math.cos(theta), vy: Math.sin(theta) };
 			};
 
-			// 각 변 그룹에서 "가장 바깥(중심에서 가장 먼)" 선분 밴드만 남겨 피팅.
-			//    안쪽 쿠션/반사로 검출된 선분은 |off|가 작아 자동으로 제외됨.
-			const OUTER_BAND = tableScale * 0.05; // 바깥 밴드 두께 (튜닝값)
-			const fitOuter = (gsegs: GSeg[]): Line<"fetch"> | null => {
-				if (gsegs.length === 0) {
+			// RANSAC 직선 피팅: 내부선/가림 부분/노이즈를 outlier로 제거.
+			const RANSAC_THRESHOLD = Math.max(2, tableScale * 0.02); // 인라이어 허용 거리(px)
+			const RANSAC_ITERS = 80;
+			const ransacFit = (pts: P[]): ILine | null => {
+				if (pts.length < 2) {
 					return null;
 				}
-				let maxAbs = 0;
-				for (const g of gsegs) {
-					maxAbs = Math.max(maxAbs, Math.abs(g.off));
+				if (pts.length === 2) {
+					return tlsFit(pts);
 				}
-				const pts: WPoint[] = [];
-				for (const g of gsegs) {
-					if (Math.abs(g.off) < maxAbs - OUTER_BAND) {
+				let bestAx = 0;
+				let bestAy = 0;
+				let bestNx = 0;
+				let bestNy = 0;
+				let bestCount = -1;
+				for (let k = 0; k < RANSAC_ITERS; k++) {
+					const i = Math.floor(Math.random() * pts.length);
+					let j = Math.floor(Math.random() * pts.length);
+					if (i === j) {
+						j = (j + 1) % pts.length;
+					}
+					const a = pts[i];
+					const b = pts[j];
+					let dx = b.x - a.x;
+					let dy = b.y - a.y;
+					const len = Math.hypot(dx, dy);
+					if (len < 1e-6) {
 						continue;
 					}
-					// 끝점 두 개를 길이 가중치와 함께 추가
-					pts.push({ x: g.x1, y: g.y1, w: g.len });
-					pts.push({ x: g.x2, y: g.y2, w: g.len });
+					dx /= len;
+					dy /= len;
+					// 후보 직선의 법선
+					const nx = -dy;
+					const ny = dx;
+					let count = 0;
+					for (const p of pts) {
+						if (
+							Math.abs((p.x - a.x) * nx + (p.y - a.y) * ny) < RANSAC_THRESHOLD
+						) {
+							count++;
+						}
+					}
+					if (count > bestCount) {
+						bestCount = count;
+						bestAx = a.x;
+						bestAy = a.y;
+						bestNx = nx;
+						bestNy = ny;
+					}
 				}
-				return fitLine(pts);
+				if (bestCount < 2) {
+					return null;
+				}
+				// 최적 모델의 인라이어만 모아 정밀 재피팅(TLS)
+				const inliers = pts.filter(
+					(p) =>
+						Math.abs((p.x - bestAx) * bestNx + (p.y - bestAy) * bestNy) <
+						RANSAC_THRESHOLD,
+				);
+				return tlsFit(inliers);
 			};
 
-			const candidateLines = groups.map(fitOuter);
+			// 1) 대략적 4변(원근 사각형): convex hull → approxPolyDP epsilon 이분탐색으로
+			//    정확히 4점까지 단순화. 점 배정의 "기준"으로만 사용 (정밀도는 RANSAC이 담당).
+			const hull = track(new cv.Mat());
+			cv.convexHull(contour, hull, false, true);
+			const roughCorners = ((): P[] => {
+				const peri = cv.arcLength(hull, true);
+				let lo = 0;
+				let hi = peri;
+				for (let it = 0; it < 32; it++) {
+					const mid = (lo + hi) / 2;
+					const approx = track(new cv.Mat());
+					cv.approxPolyDP(hull, approx, mid, true);
+					const n = approx.rows;
+					if (n === 4) {
+						return [0, 1, 2, 3].map((i) => ({
+							x: approx.data32S[i * 2],
+							y: approx.data32S[i * 2 + 1],
+						}));
+					}
+					// epsilon이 커질수록 꼭짓점 수는 단조 감소
+					if (n > 4) {
+						lo = mid;
+					} else {
+						hi = mid;
+					}
+				}
+				// 4점을 못 얻으면 x±y 극값으로 추정 (fallback)
+				let tl = cpts[0];
+				let br = cpts[0];
+				let tr = cpts[0];
+				let bl = cpts[0];
+				for (const p of cpts) {
+					if (p.x + p.y < tl.x + tl.y) tl = p;
+					if (p.x + p.y > br.x + br.y) br = p;
+					if (p.x - p.y > tr.x - tr.y) tr = p;
+					if (p.x - p.y < bl.x - bl.y) bl = p;
+				}
+				return [tl, tr, br, bl];
+			})();
 
-			// 4) 4변이 모두 검출된 경우에만 사각형 복원.
+			// 2) contour 점들을 가장 가까운(수직거리) 대략적 변에 배정.
+			const groups: [P[], P[], P[], P[]] = [[], [], [], []];
+			for (const p of cpts) {
+				let best = 0;
+				let bestDist = Infinity;
+				for (let e = 0; e < 4; e++) {
+					const a = roughCorners[e];
+					const b = roughCorners[(e + 1) % 4];
+					let vx = b.x - a.x;
+					let vy = b.y - a.y;
+					const len = Math.hypot(vx, vy) || 1;
+					vx /= len;
+					vy /= len;
+					// 변의 무한직선까지의 수직거리
+					const d = Math.abs((p.x - a.x) * -vy + (p.y - a.y) * vx);
+					if (d < bestDist) {
+						bestDist = d;
+						best = e;
+					}
+				}
+				groups[best].push(p);
+			}
+
+			// 3) 각 변을 RANSAC로 robust 피팅.
+			const fittedLines = groups.map(ransacFit);
+
+			// 디버깅용: 피팅된 직선을 긴 선분으로 변환해 보관 (fetch 좌표)
+			for (const l of fittedLines) {
+				if (!l) {
+					continue;
+				}
+				lines.push({
+					start: {
+						x: l.px - l.vx * tableScale + x0,
+						y: l.py - l.vy * tableScale + y0,
+					},
+					end: {
+						x: l.px + l.vx * tableScale + x0,
+						y: l.py + l.vy * tableScale + y0,
+					},
+				});
+			}
+
+			// 4) 4변이 모두 피팅된 경우에만 인접 직선 교차로 꼭짓점 복원.
 			//    (변 하나가 통째로 가려지면 복원 불가 → 다음 프레임에서 재시도)
-			if (candidateLines.every((l): l is Line<"fetch"> => l !== null)) {
-				logger.debug("All 4 lines detected, fitting quad...");
+			if (fittedLines.every((l): l is ILine => l !== null)) {
+				const fitted = fittedLines as [ILine, ILine, ILine, ILine];
 
-				const fitted = candidateLines as [
-					Line<"fetch">,
-					Line<"fetch">,
-					Line<"fetch">,
-					Line<"fetch">,
-				];
-
-				// 중심에서 각 직선에 내린 수선의 발 방향으로 4변을 원형 정렬.
-				const ordered = fitted
-					.map((l) => {
-						const { px, py, vx, vy } = lineDir(l);
-						const t = (ccx - px) * vx + (ccy - py) * vy;
-						const fx = px + t * vx - ccx;
-						const fy = py + t * vy - ccy;
-						return { line: l, angle: Math.atan2(fy, fx) };
-					})
-					.sort((a, b) => a.angle - b.angle)
-					.map((o) => o.line);
-
-				// 5) 인접한 두 직선의 교점을 꼭짓점으로 사용.
-				const intersect = (
-					a: Line<"fetch">,
-					b: Line<"fetch">,
-				): { x: number; y: number } => {
-					const la = lineDir(a);
-					const lb = lineDir(b);
-					const denom = la.vx * lb.vy - la.vy * lb.vx;
+				const intersect = (a: ILine, b: ILine): P => {
+					const denom = a.vx * b.vy - a.vy * b.vx;
 					// 거의 평행하면 교점이 불안정 → 두 기준점의 중점으로 대체
 					if (Math.abs(denom) < 1e-6) {
-						return { x: (la.px + lb.px) / 2, y: (la.py + lb.py) / 2 };
+						return { x: (a.px + b.px) / 2, y: (a.py + b.py) / 2 };
 					}
-					const t = ((lb.px - la.px) * lb.vy - (lb.py - la.py) * lb.vx) / denom;
-					return { x: la.px + t * la.vx, y: la.py + t * la.vy };
+					const t = ((b.px - a.px) * b.vy - (b.py - a.py) * b.vx) / denom;
+					return { x: a.px + t * a.vx, y: a.py + t * a.vy };
 				};
 
-				const corners = ordered.map((_, i) => {
-					const c = intersect(ordered[i], ordered[(i + 1) % 4]);
+				// roughCorners가 순환 순서이므로 변(fitted)도 순환 순서.
+				// 변 i와 변 (i+1)의 교점이 곧 인접 꼭짓점.
+				const corners = fitted.map((_, i) => {
+					const c = intersect(fitted[i], fitted[(i + 1) % 4]);
 					return { x: c.x + x0, y: c.y + y0 };
 				});
 
 				points = [corners[0], corners[1], corners[2], corners[3]];
-
-				logger.debug(`Fitted quad points:`);
-				for (const [i, point] of points.entries()) {
-					logger.debug(
-						`  Point ${i}: (${point.x.toFixed(2)}, ${point.y.toFixed(2)})`,
-					);
-				}
 			}
 		}
 
@@ -1267,7 +1278,7 @@ class Cuebit {
 	/**
 	 *
 	 */
-	public async process(source: HTMLVideoElement) {
+	public async process(source: HTMLVideoElement): Promise<FrameResult> {
 		// 이전 버퍼 인덱스 계산
 		const previousBufferIndex = 1 - this.currentBufferIndex;
 

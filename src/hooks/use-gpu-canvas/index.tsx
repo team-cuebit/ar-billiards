@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from "react";
 import { todo } from "@/common";
-import logger from "@/lib/logger";
 
 function useGPUCanvas() {
 	const [spec, setSpec] = useState<CanvasSpec | null>(null);
@@ -31,7 +30,9 @@ function useGPUCanvas() {
 								// AR 오버레이의 빈 배경을 투명하게 만들기 위한 WebGPU 설정
 								alphaMode: "premultiplied",
 								usage:
-									GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+									GPUTextureUsage.COPY_SRC |
+									GPUTextureUsage.COPY_DST |
+									GPUTextureUsage.RENDER_ATTACHMENT,
 							});
 							configuredCanvasRef.current = canvas;
 						}
