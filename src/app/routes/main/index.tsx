@@ -14,6 +14,7 @@ import {
 import HitControlPanel from "@/components/hit-params-panel";
 import OverlayToggleButton from "@/components/overlay-toggle-button";
 import hyperparams from "@/config/hyperparams";
+import { vars } from "@/config/theme.css";
 import useDebugCanvas from "@/hooks/use-debug-canvas";
 import useGPUCanvas from "@/hooks/use-gpu-canvas";
 import type { FrameInfo } from "@/lib/capture";
@@ -26,7 +27,7 @@ import {
 	TrajectoryPainter,
 } from "@/lib/painter";
 import Simulator from "@/lib/simulator";
-import styles from "./index.module.css";
+import { animation, styles } from "./index.css";
 
 function createOffscreenCanvasHandle(
 	width: number,
@@ -769,7 +770,7 @@ function Main() {
 
 	return (
 		<div
-			className={styles.container}
+			className={styles.root}
 			style={{
 				width: "100vw",
 				height: "100vh",
@@ -897,33 +898,98 @@ function Main() {
 			</div>
 
 			{/* 상단 헤더 */}
-			<div className={styles.header}>
+			<div
+				style={{
+					position: "absolute",
+					top: 0,
+					left: 0,
+					width: "100%",
+					padding: "15px",
+					zIndex: 10,
+					backgroundColor: `linear-gradient(to bottom, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%)`,
+					boxSizing: "border-box",
+					pointerEvents: "none",
+					display: "flex",
+					flexDirection: "column",
+				}}
+			>
 				<div>
-					<h1 className={styles.title}>
-						Cue<span className={styles.titleAccent}>bit</span>
+					<h1
+						style={{
+							fontSize: vars.fontSize.title,
+							fontWeight: "800",
+						}}
+					>
+						Cue<span style={{ color: "#00e5ff" }}>bit</span>
 					</h1>
-					<p className={styles.subtitle}>Real-time Trajectory</p>
+					<p
+						style={{
+							color: "rgba(255, 255, 255, 0.7)",
+							fontSize: vars.fontSize.subtitle,
+						}}
+					>
+						Real-time Trajectory
+					</p>
 				</div>
 				{isOverlayEnabled && (
-					<div className={styles.analyzingBadge}>
-						<div className={styles.analyzingDot} />
-						<span className={styles.analyzingText}>실시간 분석 중...</span>
+					<div
+						style={{
+							marginTop: "8px",
+							display: "inline-flex",
+							alignItems: "center",
+							backgroundColor: "rgba(0, 0, 0, 0.6)",
+							padding: "4px 9px",
+							borderRadius: "20px",
+							border: `1px solid #ff4757`,
+							width: "fit-content",
+						}}
+					>
+						<div
+							style={{
+								width: "5px",
+								height: "5px",
+								borderRadius: "50%",
+								backgroundColor: "#ff4757",
+								marginRight: "6px",
+								animation: `${animation.blink} 1s infinite`,
+							}}
+						/>
+						<span
+							style={{
+								color: "#ff4757",
+								fontSize: "8px",
+							}}
+						>
+							실시간 분석 중...
+						</span>
 					</div>
 				)}
 			</div>
 
 			{/* 하단 컨트롤 패널 */}
 			<div
-				className={`${styles.controls} ${
-					isControlUiHidden ? styles.controlsHidden : ""
-				}`}
+				style={{
+					position: "absolute",
+					bottom: "14px",
+					left: "50%",
+					transform: "translateX(-50%)",
+					zIndex: 10,
+					boxSizing: "border-box",
+					width: "min(320px, 90vw)",
+					display: "flex",
+					flexDirection: "column",
+					alignItems: "center",
+					gap: "8px",
+				}}
 			>
 				<div
-					className={
-						isOverlayEnabled && !isControlUiHidden
-							? ""
-							: styles.controlPanelHidden
-					}
+					style={{
+						width: "100%",
+						height: "auto",
+						overflow: "hidden",
+                        opacity: isControlUiHidden ? 0 : 1,
+						transition: "opacity 0.2s ease-out",
+					}}
 				>
 					<HitControlPanel
 						onHitPointChange={(point) => {
@@ -934,27 +1000,51 @@ function Main() {
 						}}
 					/>
 				</div>
-				<div className={styles.actionRow}>
-					{isOverlayEnabled && (
-						<button
-							type="button"
-							className={styles.controlVisibilityButton}
-							onClick={() => setIsControlUiHidden((prev) => !prev)}
-						>
-							{isControlUiHidden ? "UI 표시" : "UI 숨김"}
-						</button>
-					)}
-					{!isControlUiHidden && (
-						<OverlayToggleButton
-							enabled={isOverlayEnabled}
-							onClick={() => {
-								if (isOverlayEnabled) {
-									setIsControlUiHidden(false);
-								}
-								setIsOverlayEnabled((prev) => !prev);
-							}}
-						/>
-					)}
+				<div
+					style={{
+						width: "100%",
+						display: "flex",
+						gap: isOverlayEnabled && !isControlUiHidden ? "8px" : 0,
+						transition: "gap 0.2s ease-out",
+					}}
+				>
+					<button
+						type="button"
+						className={styles.button}
+						style={{
+							transition: "flex 0.2s ease-out",
+							flex: isOverlayEnabled ? 1 : 0,
+						}}
+						onClick={() => setIsControlUiHidden((prev) => !prev)}
+					>
+						{isControlUiHidden ? "UI 표시" : "UI 숨김"}
+					</button>
+					<button
+						type="button"
+						className={styles.button}
+						style={{
+							transition: "flex 0.2s ease-out, background 0.2s ease-out",
+							flex: isControlUiHidden ? 0 : 1,
+							...(isOverlayEnabled
+								? {
+										background: "rgba(255, 71, 87, 0.2)",
+										color: "#ff4757",
+										border: "1px solid #ff4757 !important",
+									}
+								: {
+										background:
+											"linear-gradient(135deg, #00e5ff 0%, #007bff 100%)",
+									}),
+						}}
+						onClick={() => {
+							if (isOverlayEnabled) {
+								setIsControlUiHidden(false);
+							}
+							setIsOverlayEnabled((prev) => !prev);
+						}}
+					>
+						{isOverlayEnabled ? "AR 종료" : "AR 시작"}
+					</button>
 				</div>
 			</div>
 
