@@ -709,10 +709,10 @@ function Main() {
 							"Process Frame",
 						);
 						const bufferIndex = cuebit.getCurrentBufferIndex();
-						const buffetSet = cuebit.getBuffer(bufferIndex);
+						const bufferSet = cuebit.getBuffer(bufferIndex);
 						loop(
 							result,
-							buffetSet,
+							bufferSet,
 							simulator,
 							trajectoryDrawerCanvas,
 							overlayCanvas,
