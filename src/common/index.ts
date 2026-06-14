@@ -29,6 +29,42 @@ export function measure<T>(
 	return result;
 }
 
+interface ScopedMeasure {
+	<R>(fn: () => Promise<R>, tag?: string): Promise<R>;
+	<R>(fn: () => R, tag?: string): R;
+}
+
+export function measureScope<T>(
+	scope: (measure: ScopedMeasure) => T,
+	groupTag: string,
+): T {
+	let accumulated = 0;
+
+	const log = (duration: number, tag?: string) => {
+		accumulated += duration;
+		logger.debug(
+			`[${groupTag}] executed in ${duration.toFixed(2)} ms (accumulated: ${accumulated.toFixed(2)} ms) ${tag ?? "Task"} `,
+		);
+	};
+
+	const measure = (<R>(task: () => R | Promise<R>, tag?: string) => {
+		const start = performance.now();
+		const result = task();
+
+		if (result instanceof Promise) {
+			return result.then((val) => {
+				log(performance.now() - start, tag);
+				return val;
+			});
+		}
+
+		log(performance.now() - start, tag);
+		return result;
+	}) as ScopedMeasure;
+
+	return scope(measure);
+}
+
 /**
  * 16배수 정렬
  */

@@ -29,7 +29,7 @@ declare global {
 	type CanvasSpec = {
 		width: number;
 		height: number;
-		onMount: (canvas: HTMLCanvasElement) => void;
+		onMount: React.RefCallback<HTMLCanvasElement>;
 	};
 
 	type CanvasHandle<T extends keyof ContextMap> = {

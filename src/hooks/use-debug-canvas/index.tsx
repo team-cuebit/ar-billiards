@@ -1,4 +1,10 @@
-import { type CSSProperties, useCallback, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type RefCallback,
+	useCallback,
+	useRef,
+	useState,
+} from "react";
 import { todo } from "@/common";
 
 export type DebugCanvasSpec = {
@@ -6,7 +12,7 @@ export type DebugCanvasSpec = {
 	width: number;
 	height: number;
 	style: CSSProperties;
-	onMount: (canvas: HTMLCanvasElement) => void;
+	onMount: RefCallback<HTMLCanvasElement>;
 	name?: string;
 };
 
@@ -30,6 +36,10 @@ function useDebugCanvas() {
 						height,
 						style,
 						onMount: (canvas) => {
+							if (!canvas) {
+								return;
+							}
+
 							const context =
 								canvas.getContext("2d") ?? todo(`context를 얻을 수 없음`);
 
@@ -63,6 +73,10 @@ function useDebugCanvas() {
 						height,
 						style,
 						onMount: (canvas) => {
+							if (!canvas) {
+								return;
+							}
+
 							const context =
 								canvas.getContext("webgpu") ?? todo(`context를 얻을 수 없음`);
 

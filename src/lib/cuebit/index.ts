@@ -1,7 +1,13 @@
 import cv from "@techstark/opencv-js";
 import type { InferenceSession } from "onnxruntime-web";
 import * as ort from "onnxruntime-web/webgpu";
-import { alignTo16, dist, measure, snapshotMat, withMatScope } from "@/common";
+import {
+	alignTo16,
+	dist,
+	measureScope,
+	snapshotMat,
+	withMatScope,
+} from "@/common";
 import logger from "@/lib/logger";
 import type { ONNX } from "@/lib/onnx";
 import type { FrameInfo } from "../capture";
@@ -1189,181 +1195,184 @@ class Cuebit {
 	 *
 	 */
 	public async process(source: HTMLVideoElement): Promise<FrameResult> {
-		// 이전 버퍼 인덱스 계산
-		const previousBufferIndex = 1 - this.currentBufferIndex;
+		return measureScope(async (measure) => {
+			// 이전 버퍼 인덱스 계산
+			const previousBufferIndex = 1 - this.currentBufferIndex;
 
-		// 현재 버퍼와 이전 버퍼 참조
-		const [currentBuffer, previousBuffer] = [
-			this.buffers[this.currentBufferIndex],
-			this.buffers[previousBufferIndex],
-		];
+			// 현재 버퍼와 이전 버퍼 참조
+			const [currentBuffer, previousBuffer] = [
+				this.buffers[this.currentBufferIndex],
+				this.buffers[previousBufferIndex],
+			];
 
-		measure(() => {
-			// 프레임을 텍스처로 복사
-			this.device.queue.copyExternalImageToTexture(
-				{
-					source,
-				},
-				{
-					texture: currentBuffer.frameTexture,
-				},
-				[this.frameInfo.width, this.frameInfo.height],
+			measure(() => {
+				// 프레임을 텍스처로 복사
+				this.device.queue.copyExternalImageToTexture(
+					{
+						source,
+					},
+					{
+						texture: currentBuffer.frameTexture,
+					},
+					[this.frameInfo.width, this.frameInfo.height],
+				);
+
+				// 프레임 전처리
+				const commandEncoder = this.device.createCommandEncoder();
+				this.resize(commandEncoder, currentBuffer);
+				this.hwc2chw(commandEncoder, currentBuffer);
+				this.device.queue.submit([commandEncoder.finish()]);
+			}, "전처리 (resize, hwc2chw)");
+
+			// buffer의 프레임 추론 결과 대기
+			await measure(
+				() => previousBuffer.pendingSegmentationInference,
+				"추론 결과 대기",
 			);
 
-			// 프레임 전처리
-			const commandEncoder = this.device.createCommandEncoder();
-			this.resize(commandEncoder, currentBuffer);
-			this.hwc2chw(commandEncoder, currentBuffer);
-			this.device.queue.submit([commandEncoder.finish()]);
-		}, "전처리 (resize, hwc2chw)");
+			const postprocessResult: Postprocess = await measure(async () => {
+				// buffer의 추론 결과를 staging 버퍼로 복사
+				const stagingCommandEncoder = this.device.createCommandEncoder();
+				stagingCommandEncoder.copyBufferToBuffer(
+					previousBuffer.detectionsBuffer,
+					0,
+					previousBuffer.detectionsReadBuffer,
+					0,
+					previousBuffer.detectionsReadBuffer.size,
+				);
+				this.device.queue.submit([stagingCommandEncoder.finish()]);
 
-		// buffer의 프레임 추론 결과 대기
-		await measure(
-			() => previousBuffer.pendingSegmentationInference,
-			"추론 결과 대기",
-		);
+				await previousBuffer.detectionsReadBuffer.mapAsync(GPUMapMode.READ);
+				const detections = toDetections(
+					new Float32Array(
+						previousBuffer.detectionsReadBuffer.getMappedRange().slice(0),
+					),
+					this.onnx.segementation.output.fetchs.detections.stride,
+				);
+				previousBuffer.detectionsReadBuffer.unmap();
 
-		const postprocessResult: Postprocess = await measure(async () => {
-			// buffer의 추론 결과를 staging 버퍼로 복사
-			const stagingCommandEncoder = this.device.createCommandEncoder();
-			stagingCommandEncoder.copyBufferToBuffer(
-				previousBuffer.detectionsBuffer,
-				0,
-				previousBuffer.detectionsReadBuffer,
-				0,
-				previousBuffer.detectionsReadBuffer.size,
+				// 추론 결과에서 테이블, 공, 큐 선택
+				const [table, balls, cue] = this.select(detections);
+
+				logger.info(
+					table
+						? `인식된 테이블 index: ${table.index}, confidence: ${table.confidence.toFixed(2)}, bbox: (${table.bbox.lt.x.toFixed(0)}, ${table.bbox.lt.y.toFixed(0)}), (${table.bbox.rb.x.toFixed(0)}, ${table.bbox.rb.y.toFixed(0)})`
+						: "테이블 인식 실패",
+				);
+				logger.info(`인식된 공 ${balls.length}개`);
+				logger.info(
+					cue
+						? `인식된 큐 index: ${cue.index}, confidence: ${cue.confidence.toFixed(2)}, bbox: (${cue.bbox.lt.x.toFixed(0)}, ${cue.bbox.lt.y.toFixed(0)}), (${cue.bbox.rb.x.toFixed(0)}, ${cue.bbox.rb.y.toFixed(0)})`
+						: "큐 인식 실패",
+				);
+
+				const [tableMask, cueMask] = await this.getDetectionMasks(
+					previousBuffer,
+					table,
+					cue,
+				);
+
+				logger.info(
+					`테이블 마스크: ${tableMask ? "생성됨" : "생성 실패"}, 큐 마스크: ${cueMask ? "생성됨" : "생성 실패"}`,
+				);
+
+				return {
+					tableMask,
+					balls: balls.map((ball) => ({
+						x: (ball.bbox.lt.x + ball.bbox.rb.x) / 2,
+						y: (ball.bbox.lt.y + ball.bbox.rb.y) / 2,
+					})),
+					cueMask,
+				};
+			}, "후처리");
+
+			// 이전 추론이 완료된 후 현재 버퍼에 대해 추론 시작
+			measure(() => {
+				currentBuffer.pendingSegmentationInference =
+					this.onnx.segementation.session.run(
+						{
+							[this.onnx.segementation.input.feeds.image.name]:
+								currentBuffer.inputTensor,
+						},
+						{
+							[this.onnx.segementation.output.fetchs.detections.name]:
+								currentBuffer.detectionsTensor,
+							[this.onnx.segementation.output.fetchs.protos.name]:
+								currentBuffer.protosTensor,
+						},
+					);
+			}, "추론 태스크 등록");
+
+			const tableApproximation = measure(
+				() => postprocessResult && this.getTablePoints(postprocessResult),
+				"테이블처럼 보이는 점 찾기",
 			);
-			this.device.queue.submit([stagingCommandEncoder.finish()]);
-
-			await previousBuffer.detectionsReadBuffer.mapAsync(GPUMapMode.READ);
-			const detections = toDetections(
-				new Float32Array(
-					previousBuffer.detectionsReadBuffer.getMappedRange().slice(0),
-				),
-				this.onnx.segementation.output.fetchs.detections.stride,
-			);
-			previousBuffer.detectionsReadBuffer.unmap();
-
-			// 추론 결과에서 테이블, 공, 큐 선택
-			const [table, balls, cue] = this.select(detections);
-
-			logger.info(
-				table
-					? `인식된 테이블 index: ${table.index}, confidence: ${table.confidence.toFixed(2)}, bbox: (${table.bbox.lt.x.toFixed(0)}, ${table.bbox.lt.y.toFixed(0)}), (${table.bbox.rb.x.toFixed(0)}, ${table.bbox.rb.y.toFixed(0)})`
-					: "테이블 인식 실패",
-			);
-			logger.info(`인식된 공 ${balls.length}개`);
-			logger.info(
-				cue
-					? `인식된 큐 index: ${cue.index}, confidence: ${cue.confidence.toFixed(2)}, bbox: (${cue.bbox.lt.x.toFixed(0)}, ${cue.bbox.lt.y.toFixed(0)}), (${cue.bbox.rb.x.toFixed(0)}, ${cue.bbox.rb.y.toFixed(0)})`
-					: "큐 인식 실패",
+			const quadForTable =
+				(tableApproximation?.points && toQuad(tableApproximation.points)) ??
+				null;
+			const cueApproximation = measure(
+				() => postprocessResult && this.getCuePoints(postprocessResult),
+				"큐처럼 보이는 점 찾기",
 			);
 
-			const [tableMask, cueMask] = await this.getDetectionMasks(
-				previousBuffer,
-				table,
-				cue,
+			const transform = measure(
+				() =>
+					quadForTable
+						? {
+								quad: quadForTable,
+								matrix: getTransformMatrix(quadForTable),
+							}
+						: null,
+				"변환 행렬 계산",
 			);
 
-			logger.info(
-				`테이블 마스크: ${tableMask ? "생성됨" : "생성 실패"}, 큐 마스크: ${cueMask ? "생성됨" : "생성 실패"}`,
+			// 버퍼 인덱스 업데이트
+			this.currentBufferIndex = (1 - this.currentBufferIndex) as BufferIndex;
+
+			const feedToFetchX =
+				this.onnx.segementation.output.fetchs.protos.width /
+				this.onnx.segementation.input.feeds.image.width;
+			const feedToFetchY =
+				this.onnx.segementation.output.fetchs.protos.height /
+				this.onnx.segementation.input.feeds.image.height;
+
+			const ballPoints: Vector2<"fetch">[] = measure(
+				() =>
+					postprocessResult?.balls?.map((ball) => ({
+						x: ball.x * feedToFetchX,
+						y: ball.y * feedToFetchY,
+					})) ?? [],
+				"공 좌표계 변환 (feed -> fetch)",
 			);
+
+			if (!postprocessResult) {
+				return {
+					table: null,
+					ballPoints: [],
+					cue: null,
+				};
+			}
 
 			return {
-				tableMask,
-				balls: balls.map((ball) => ({
-					x: (ball.bbox.lt.x + ball.bbox.rb.x) / 2,
-					y: (ball.bbox.lt.y + ball.bbox.rb.y) / 2,
-				})),
-				cueMask,
-			};
-		}, "후처리");
-
-		// 이전 추론이 완료된 후 현재 버퍼에 대해 추론 시작
-		measure(() => {
-			currentBuffer.pendingSegmentationInference =
-				this.onnx.segementation.session.run(
-					{
-						[this.onnx.segementation.input.feeds.image.name]:
-							currentBuffer.inputTensor,
-					},
-					{
-						[this.onnx.segementation.output.fetchs.detections.name]:
-							currentBuffer.detectionsTensor,
-						[this.onnx.segementation.output.fetchs.protos.name]:
-							currentBuffer.protosTensor,
-					},
-				);
-		}, "추론 태스크 등록");
-
-		const tableApproximation = measure(
-			() => postprocessResult && this.getTablePoints(postprocessResult),
-			"테이블처럼 보이는 점 찾기",
-		);
-		const quadForTable =
-			(tableApproximation?.points && toQuad(tableApproximation.points)) ?? null;
-		const cueApproximation = measure(
-			() => postprocessResult && this.getCuePoints(postprocessResult),
-			"큐처럼 보이는 점 찾기",
-		);
-
-		const transform = measure(
-			() =>
-				quadForTable
+				// TODO: 리팩토링 필요
+				table: tableApproximation
+					? transform
+						? {
+								transform,
+								approximation: tableApproximation,
+							}
+						: {
+								approximation: tableApproximation,
+							}
+					: null,
+				ballPoints,
+				cue: cueApproximation
 					? {
-							quad: quadForTable,
-							matrix: getTransformMatrix(quadForTable),
+							approximation: cueApproximation,
 						}
 					: null,
-			"변환 행렬 계산",
-		);
-
-		// 버퍼 인덱스 업데이트
-		this.currentBufferIndex = (1 - this.currentBufferIndex) as BufferIndex;
-
-		const feedToFetchX =
-			this.onnx.segementation.output.fetchs.protos.width /
-			this.onnx.segementation.input.feeds.image.width;
-		const feedToFetchY =
-			this.onnx.segementation.output.fetchs.protos.height /
-			this.onnx.segementation.input.feeds.image.height;
-
-		const ballPoints: Vector2<"fetch">[] = measure(
-			() =>
-				postprocessResult?.balls?.map((ball) => ({
-					x: ball.x * feedToFetchX,
-					y: ball.y * feedToFetchY,
-				})) ?? [],
-			"공 좌표계 변환 (feed -> fetch)",
-		);
-
-		if (!postprocessResult) {
-			return {
-				table: null,
-				ballPoints: [],
-				cue: null,
-			};
-		}
-
-		return {
-			// TODO: 리팩토링 필요
-			table: tableApproximation
-				? transform
-					? {
-							transform,
-							approximation: tableApproximation,
-						}
-					: {
-							approximation: tableApproximation,
-						}
-				: null,
-			ballPoints,
-			cue: cueApproximation
-				? {
-						approximation: cueApproximation,
-					}
-				: null,
-		} as const;
+			} as const;
+		}, "프레임 처리");
 	}
 
 	public getCurrentBufferIndex(): BufferIndex {

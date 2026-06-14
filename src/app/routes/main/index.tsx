@@ -5,7 +5,7 @@ import {
 	dist,
 	exportCanvasToPNG,
 	exportGPUTextureToPNG,
-	measure,
+	measureScope,
 	rerange,
 	restoreMat,
 	todo,
@@ -17,7 +17,7 @@ import { vars } from "@/config/theme.css";
 import useDebugCanvas from "@/hooks/use-debug-canvas";
 import useGPUCanvas from "@/hooks/use-gpu-canvas";
 import type { FrameInfo } from "@/lib/capture";
-import Cuebit from "@/lib/cuebit";
+import Cuebit, { type BufferIndex } from "@/lib/cuebit";
 import logger from "@/lib/logger";
 import { device, onnx } from "@/lib/onnx";
 import {
@@ -224,389 +224,474 @@ function Main() {
 			normalizedTableDebugCanvas: CanvasHandle<"2d">,
 			trajectoryDebugCanvas: CanvasHandle<"2d">,
 		) => {
-			const result = isOverlayEnabled
-				? await measure(() => cuebit.process(video), "Process Frame")
-				: null;
-			const bufferIndex = cuebit.getCurrentBufferIndex();
-			const bufferSet = cuebit.getBuffer(bufferIndex);
+			return measureScope(async (measure) => {
+				const result = isOverlayEnabled
+					? await measure(() => cuebit.process(video), "Process Frame")
+					: null;
+				const bufferIndex = (1 - cuebit.getCurrentBufferIndex()) as BufferIndex;
+				const bufferSet = cuebit.getBuffer(bufferIndex);
 
-			if (import.meta.env.DEV) {
-				drawTexture(resizedFrameDebugCanvas, bufferSet.resizedFrameTexture);
-				drawTexture(tableMaskDebugCanvas, bufferSet.tableMaskFrameTexture);
-				drawTexture(cueMaskDebugCanvas, bufferSet.cueMaskFrameTexture);
-
-				detectionDebugCanvas.draw((context, width, height) => {
-					const protoToCanvasX =
-						width / onnx.segementation.output.fetchs.protos.width;
-					const protoToCanvasY =
-						height / onnx.segementation.output.fetchs.protos.height;
-					const feedToCanvasX =
-						width / onnx.segementation.input.feeds.image.width;
-					const feedToCanvasY =
-						height / onnx.segementation.input.feeds.image.height;
-
-					context.clearRect(0, 0, width, height);
-
-					if (result?.table) {
-						context.strokeStyle = "blue";
-						context.lineWidth = width * 0.002;
-
-						context.beginPath();
-
-						context.fillText(
-							"table",
-							((result.table.approximation.mask.detection.bbox.lt.x +
-								result.table.approximation.mask.detection.bbox.rb.x) /
-								2) *
-								feedToCanvasX,
-							result.table.approximation.mask.detection.bbox.lt.y *
-								feedToCanvasY,
-						);
-
-						context.rect(
-							result.table.approximation.mask.detection.bbox.lt.x *
-								feedToCanvasX,
-							result.table.approximation.mask.detection.bbox.lt.y *
-								feedToCanvasY,
-							(result.table.approximation.mask.detection.bbox.rb.x -
-								result.table.approximation.mask.detection.bbox.lt.x) *
-								feedToCanvasX,
-							(result.table.approximation.mask.detection.bbox.rb.y -
-								result.table.approximation.mask.detection.bbox.lt.y) *
-								feedToCanvasY,
-						);
-						context.stroke();
-
-						context.strokeStyle = "rgb(0, 255, 255, 0.8)";
-						context.lineWidth = width * 0.01;
-						for (const point of result.table.approximation.lines) {
-							context.beginPath();
-							context.moveTo(
-								point.start.x * protoToCanvasX,
-								point.start.y * protoToCanvasY,
-							);
-							context.lineTo(
-								point.end.x * protoToCanvasX,
-								point.end.y * protoToCanvasY,
-							);
-
-							context.stroke();
-						}
-
-						if (result.table.transform) {
-							context.strokeStyle = "red";
-							context.lineWidth = width * 0.005;
-							context.font = `${width * 0.02}px Arial`;
-							context.fillStyle = "red";
-							context.textAlign = "center";
-							context.textBaseline = "bottom";
-
-							context.beginPath();
-
-							const points = [
-								result.table.transform.quad.points.topLeft,
-								result.table.transform.quad.points.bottomLeft,
-								result.table.transform.quad.points.bottomRight,
-								result.table.transform.quad.points.topRight,
-							];
-
-							for (let i = 0; i < 4; i++) {
-								const point = points[i];
-								context.fillText(
-									`${i}`,
-									point.x * protoToCanvasX,
-									point.y * protoToCanvasY,
-								);
-								context.moveTo(
-									point.x * protoToCanvasX,
-									point.y * protoToCanvasY,
-								);
-								const nextPoint = points[(i + 1) % 4];
-								context.lineTo(
-									nextPoint.x * protoToCanvasX,
-									nextPoint.y * protoToCanvasY,
-								);
-							}
-							context.stroke();
-						}
-					}
-
-					if (result?.cue) {
-						context.strokeStyle = "blue";
-						context.lineWidth = width * 0.002;
-
-						context.beginPath();
-
-						context.fillText(
-							"cue",
-							((result.cue.approximation.mask.detection.bbox.lt.x +
-								result.cue.approximation.mask.detection.bbox.rb.x) /
-								2) *
-								feedToCanvasX,
-							result.cue.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
-						);
-
-						context.rect(
-							result.cue.approximation.mask.detection.bbox.lt.x * feedToCanvasX,
-							result.cue.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
-							(result.cue.approximation.mask.detection.bbox.rb.x -
-								result.cue.approximation.mask.detection.bbox.lt.x) *
-								feedToCanvasX,
-							(result.cue.approximation.mask.detection.bbox.rb.y -
-								result.cue.approximation.mask.detection.bbox.lt.y) *
-								feedToCanvasY,
-						);
-						context.stroke();
-
-						if (result.cue.approximation.endpoints) {
-							context.strokeStyle = "white";
-							context.lineWidth = width * 0.002;
-
-							context.beginPath();
-							context.moveTo(
-								result.cue.approximation.endpoints[0].x * protoToCanvasX,
-								result.cue.approximation.endpoints[0].y * protoToCanvasY,
-							);
-							context.lineTo(
-								result.cue.approximation.endpoints[1].x * protoToCanvasX,
-								result.cue.approximation.endpoints[1].y * protoToCanvasY,
-							);
-							context.stroke();
-						}
-
-						context.strokeStyle = "blue";
-						context.lineWidth = width * 0.002;
-
-						for (const ball of result.ballPoints) {
-							context.beginPath();
-							context.arc(
-								ball.x * protoToCanvasX,
-								ball.y * protoToCanvasY,
-								width * 0.02,
-								0,
-								2 * Math.PI,
-							);
-							context.stroke();
-						}
-					}
-				});
-			}
-
-			const tableTransform = result?.table?.transform;
-			const cuePoints = result?.cue?.approximation?.endpoints;
-			if (isControlUiHidden && tableTransform) {
-				trajectoryPainter.drawTrajectories(
-					trajectoryDebugCanvas,
-					previousTableSnapshotsRef.current,
-				);
-				trajectoryPainter.drawTrajectories(
-					trajectoryDrawerCanvas,
-					previousTableSnapshotsRef.current,
-				);
-				textureTransformer.drawTransformed(
-					trajectoryDrawerCanvas,
-					overlayCanvas,
-					tableTransform.matrix.inverseTransform,
-				);
-			} else if (tableTransform && cuePoints) {
-				const normalizedBallPoints = withMatScope((track) => {
-					const src = track(
-						cv.matFromArray(
-							result.ballPoints.length,
-							1,
-							cv.CV_32FC2,
-							result.ballPoints.flatMap((p) => [p.x, p.y]),
-						),
+				if (import.meta.env.DEV && isOverlayEnabled) {
+					measure(
+						() =>
+							drawTexture(
+								resizedFrameDebugCanvas,
+								bufferSet.resizedFrameTexture,
+							),
+						"Resized Frame 시각화",
 					);
-					const dst = track(new cv.Mat());
-					const transform = track(restoreMat(tableTransform.matrix.transform));
-					cv.perspectiveTransform(src, dst, transform);
-					const transformedPoints: Vector2<"normalized">[] = [];
-					for (let i = 0; i < result.ballPoints.length; i++) {
-						transformedPoints.push({
-							x: dst.data32F[i * 2],
-							y: dst.data32F[i * 2 + 1],
-						});
-					}
-
-					return transformedPoints;
-				});
-
-				const normalizedCuePoints = withMatScope((track) => {
-					if (!result.cue) {
-						return null;
-					}
-
-					const src = track(
-						cv.matFromArray(2, 1, cv.CV_32FC2, [
-							cuePoints[0].x,
-							cuePoints[0].y,
-							cuePoints[1].x,
-							cuePoints[1].y,
-						]),
+					measure(
+						() =>
+							drawTexture(
+								tableMaskDebugCanvas,
+								bufferSet.tableMaskFrameTexture,
+							),
+						"Table Mask 시각화",
 					);
-					const dst = track(new cv.Mat());
-					const transform = track(restoreMat(tableTransform.matrix.transform));
-					cv.perspectiveTransform(src, dst, transform);
-					const points: [Vector2<"normalized">, Vector2<"normalized">] = [
-						{
-							x: dst.data32F[0],
-							y: dst.data32F[1],
-						},
-						{
-							x: dst.data32F[2],
-							y: dst.data32F[3],
-						},
-					];
+					measure(
+						() =>
+							drawTexture(cueMaskDebugCanvas, bufferSet.cueMaskFrameTexture),
+						"Cue Mask 시각화",
+					);
 
-					return points;
-				});
+					measure(
+						() =>
+							detectionDebugCanvas.draw((context, width, height) => {
+								const protoToCanvasX =
+									width / onnx.segementation.output.fetchs.protos.width;
+								const protoToCanvasY =
+									height / onnx.segementation.output.fetchs.protos.height;
+								const feedToCanvasX =
+									width / onnx.segementation.input.feeds.image.width;
+								const feedToCanvasY =
+									height / onnx.segementation.input.feeds.image.height;
 
-				const resolvedState =
-					normalizedCuePoints &&
-					resolveTableState(normalizedCuePoints, normalizedBallPoints);
+								context.clearRect(0, 0, width, height);
 
-				if (import.meta.env.DEV) {
-					normalizedTableDebugCanvas.draw((context, width, height) => {
-						const normalToWidth = width / 2844;
-						const normalToHeight = height / 1422;
+								if (result?.table) {
+									context.strokeStyle = "blue";
+									context.lineWidth = width * 0.002;
 
-						context.clearRect(0, 0, width, height);
-						context.lineWidth = width * 0.004;
-						context.font = `${width * 0.02}px Arial`;
-						context.textAlign = "center";
-						context.textBaseline = "bottom";
+									context.beginPath();
 
-						if (resolvedState?.objectBalls) {
-							context.strokeStyle = "red";
-							context.fillStyle = "red";
-							for (let i = 0; i < resolvedState.objectBalls.length; i++) {
-								const point = resolvedState.objectBalls[i];
+									context.fillText(
+										"table",
+										((result.table.approximation.mask.detection.bbox.lt.x +
+											result.table.approximation.mask.detection.bbox.rb.x) /
+											2) *
+											feedToCanvasX,
+										result.table.approximation.mask.detection.bbox.lt.y *
+											feedToCanvasY,
+									);
 
-								context.beginPath();
-								context.arc(
-									point.x * normalToWidth,
-									point.y * normalToHeight,
-									hyperparams.ball.radius * normalToWidth * 1000,
-									0,
-									2 * Math.PI,
-								);
-								context.stroke();
+									context.rect(
+										result.table.approximation.mask.detection.bbox.lt.x *
+											feedToCanvasX,
+										result.table.approximation.mask.detection.bbox.lt.y *
+											feedToCanvasY,
+										(result.table.approximation.mask.detection.bbox.rb.x -
+											result.table.approximation.mask.detection.bbox.lt.x) *
+											feedToCanvasX,
+										(result.table.approximation.mask.detection.bbox.rb.y -
+											result.table.approximation.mask.detection.bbox.lt.y) *
+											feedToCanvasY,
+									);
+									context.stroke();
 
-								context.fillText(
-									`ball ${i}`,
-									point.x * normalToWidth,
-									point.y * normalToHeight -
-										hyperparams.ball.radius * normalToHeight * 1000,
-								);
-							}
-						}
+									context.strokeStyle = "rgb(0, 255, 255, 0.8)";
+									context.lineWidth = width * 0.01;
+									for (const point of result.table.approximation.lines) {
+										context.beginPath();
+										context.moveTo(
+											point.start.x * protoToCanvasX,
+											point.start.y * protoToCanvasY,
+										);
+										context.lineTo(
+											point.end.x * protoToCanvasX,
+											point.end.y * protoToCanvasY,
+										);
 
-						if (resolvedState?.cue && resolvedState.cueBall) {
-							context.strokeStyle = "white";
-							context.fillStyle = "white";
+										context.stroke();
+									}
 
-							context.beginPath();
-							context.arc(
-								resolvedState.cueBall.x * normalToWidth,
-								resolvedState.cueBall.y * normalToHeight,
-								hyperparams.ball.radius * normalToWidth * 1000,
-								0,
-								2 * Math.PI,
-							);
-							context.stroke();
+									if (result.table.transform) {
+										context.strokeStyle = "red";
+										context.lineWidth = width * 0.005;
+										context.font = `${width * 0.02}px Arial`;
+										context.fillStyle = "red";
+										context.textAlign = "center";
+										context.textBaseline = "bottom";
 
-							const to: Vector2<"normalized"> = {
-								x:
-									(resolvedState.cueBall.x +
-										hitPowerRef.current *
-											height *
-											Math.cos(resolvedState.cue.angle)) *
-									normalToWidth,
-								y:
-									(resolvedState.cueBall.y +
-										hitPowerRef.current *
-											height *
-											Math.sin(resolvedState.cue.angle)) *
-									normalToHeight,
-							};
+										context.beginPath();
 
-							const headLength = width * 0.02;
-							context.lineWidth = width * 0.002;
-							context.beginPath();
-							context.moveTo(
-								resolvedState.cueBall.x * normalToWidth,
-								resolvedState.cueBall.y * normalToHeight,
-							);
-							context.lineTo(to.x, to.y);
-							context.stroke();
+										const points = [
+											result.table.transform.quad.points.topLeft,
+											result.table.transform.quad.points.bottomLeft,
+											result.table.transform.quad.points.bottomRight,
+											result.table.transform.quad.points.topRight,
+										];
 
-							context.beginPath();
-							context.moveTo(to.x, to.y);
-							context.lineTo(
-								to.x -
-									headLength * Math.cos(resolvedState.cue.angle - Math.PI / 6),
-								to.y -
-									headLength * Math.sin(resolvedState.cue.angle - Math.PI / 6),
-							);
-							context.moveTo(to.x, to.y);
-							context.lineTo(
-								to.x -
-									headLength * Math.cos(resolvedState.cue.angle + Math.PI / 6),
-								to.y -
-									headLength * Math.sin(resolvedState.cue.angle + Math.PI / 6),
-							);
-							context.stroke();
-						}
-					});
+										for (let i = 0; i < 4; i++) {
+											const point = points[i];
+											context.fillText(
+												`${i}`,
+												point.x * protoToCanvasX,
+												point.y * protoToCanvasY,
+											);
+											context.moveTo(
+												point.x * protoToCanvasX,
+												point.y * protoToCanvasY,
+											);
+											const nextPoint = points[(i + 1) % 4];
+											context.lineTo(
+												nextPoint.x * protoToCanvasX,
+												nextPoint.y * protoToCanvasY,
+											);
+										}
+										context.stroke();
+									}
+								}
+
+								if (result?.cue) {
+									context.strokeStyle = "blue";
+									context.lineWidth = width * 0.002;
+
+									context.beginPath();
+
+									context.fillText(
+										"cue",
+										((result.cue.approximation.mask.detection.bbox.lt.x +
+											result.cue.approximation.mask.detection.bbox.rb.x) /
+											2) *
+											feedToCanvasX,
+										result.cue.approximation.mask.detection.bbox.lt.y *
+											feedToCanvasY,
+									);
+
+									context.rect(
+										result.cue.approximation.mask.detection.bbox.lt.x *
+											feedToCanvasX,
+										result.cue.approximation.mask.detection.bbox.lt.y *
+											feedToCanvasY,
+										(result.cue.approximation.mask.detection.bbox.rb.x -
+											result.cue.approximation.mask.detection.bbox.lt.x) *
+											feedToCanvasX,
+										(result.cue.approximation.mask.detection.bbox.rb.y -
+											result.cue.approximation.mask.detection.bbox.lt.y) *
+											feedToCanvasY,
+									);
+									context.stroke();
+
+									if (result.cue.approximation.endpoints) {
+										context.strokeStyle = "white";
+										context.lineWidth = width * 0.002;
+
+										context.beginPath();
+										context.moveTo(
+											result.cue.approximation.endpoints[0].x * protoToCanvasX,
+											result.cue.approximation.endpoints[0].y * protoToCanvasY,
+										);
+										context.lineTo(
+											result.cue.approximation.endpoints[1].x * protoToCanvasX,
+											result.cue.approximation.endpoints[1].y * protoToCanvasY,
+										);
+										context.stroke();
+									}
+
+									context.strokeStyle = "blue";
+									context.lineWidth = width * 0.002;
+
+									for (const ball of result.ballPoints) {
+										context.beginPath();
+										context.arc(
+											ball.x * protoToCanvasX,
+											ball.y * protoToCanvasY,
+											width * 0.02,
+											0,
+											2 * Math.PI,
+										);
+										context.stroke();
+									}
+								}
+							}),
+						"Detection 결과 시각화",
+					);
 				}
 
-				if (resolvedState?.cueBall) {
-					const [initialSnapshot, step] = simulator.simulate(
-						rerange(resolvedState.cueBall, 2844, 2.844),
-						resolvedState.objectBalls.map((p) => rerange(p, 2844, 2.844)),
-						resolvedState.cue.angle,
-						hitPowerRef.current,
-						hitPointRef.current,
+				const tableTransform = result?.table?.transform;
+				const cuePoints = result?.cue?.approximation?.endpoints;
+				if (isControlUiHidden && tableTransform) {
+					if (import.meta.env.DEV) {
+						measure(
+							() =>
+								trajectoryPainter.drawTrajectories(
+									trajectoryDebugCanvas,
+									previousTableSnapshotsRef.current,
+								),
+							"Trajectory 생성 (디버그)",
+						);
+					}
+					measure(
+						() =>
+							trajectoryPainter.drawTrajectories(
+								trajectoryDrawerCanvas,
+								previousTableSnapshotsRef.current,
+							),
+						"Trajectory 생성 (오버레이)",
+					);
+					measure(
+						() =>
+							textureTransformer.drawTransformed(
+								trajectoryDrawerCanvas,
+								overlayCanvas,
+								tableTransform.matrix.inverseTransform,
+							),
+						"Trajectory 오버레이 적용",
+					);
+				} else if (tableTransform && cuePoints) {
+					const normalizedBallPoints = measure(
+						() =>
+							withMatScope((track) => {
+								const src = track(
+									cv.matFromArray(
+										result.ballPoints.length,
+										1,
+										cv.CV_32FC2,
+										result.ballPoints.flatMap((p) => [p.x, p.y]),
+									),
+								);
+								const dst = track(new cv.Mat());
+								const transform = track(
+									restoreMat(tableTransform.matrix.transform),
+								);
+								cv.perspectiveTransform(src, dst, transform);
+								const transformedPoints: Vector2<"normalized">[] = [];
+								for (let i = 0; i < result.ballPoints.length; i++) {
+									transformedPoints.push({
+										x: dst.data32F[i * 2],
+										y: dst.data32F[i * 2 + 1],
+									});
+								}
+
+								return transformedPoints;
+							}),
+						"공 Detection 결과 정규화",
 					);
 
-					const snapshots = [initialSnapshot];
-					measure(() => {
-						for (let i = 0; i < 600; i++) {
-							const snapshot = step();
-							snapshots.push(snapshot);
-						}
-					}, "Simulate Trajectory");
+					const normalizedCuePoints = measure(
+						() =>
+							withMatScope((track) => {
+								if (!result.cue) {
+									return null;
+								}
 
-					previousTableSnapshotsRef.current = snapshots;
+								const src = track(
+									cv.matFromArray(2, 1, cv.CV_32FC2, [
+										cuePoints[0].x,
+										cuePoints[0].y,
+										cuePoints[1].x,
+										cuePoints[1].y,
+									]),
+								);
+								const dst = track(new cv.Mat());
+								const transform = track(
+									restoreMat(tableTransform.matrix.transform),
+								);
+								cv.perspectiveTransform(src, dst, transform);
+								const points: [Vector2<"normalized">, Vector2<"normalized">] = [
+									{
+										x: dst.data32F[0],
+										y: dst.data32F[1],
+									},
+									{
+										x: dst.data32F[2],
+										y: dst.data32F[3],
+									},
+								];
+
+								return points;
+							}),
+						"큐 Detection 결과 정규화",
+					);
+
+					const resolvedState = measure(
+						() =>
+							normalizedCuePoints &&
+							resolveTableState(normalizedCuePoints, normalizedBallPoints),
+						"테이블 상태 해석",
+					);
 
 					if (import.meta.env.DEV) {
-						trajectoryPainter.drawTrajectories(
-							trajectoryDebugCanvas,
-							snapshots,
+						measure(
+							() =>
+								normalizedTableDebugCanvas.draw((context, width, height) => {
+									const normalToWidth = width / 2844;
+									const normalToHeight = height / 1422;
+
+									context.clearRect(0, 0, width, height);
+									context.lineWidth = width * 0.004;
+									context.font = `${width * 0.02}px Arial`;
+									context.textAlign = "center";
+									context.textBaseline = "bottom";
+
+									if (resolvedState?.objectBalls) {
+										context.strokeStyle = "red";
+										context.fillStyle = "red";
+										for (let i = 0; i < resolvedState.objectBalls.length; i++) {
+											const point = resolvedState.objectBalls[i];
+
+											context.beginPath();
+											context.arc(
+												point.x * normalToWidth,
+												point.y * normalToHeight,
+												hyperparams.ball.radius * normalToWidth * 1000,
+												0,
+												2 * Math.PI,
+											);
+											context.stroke();
+
+											context.fillText(
+												`ball ${i}`,
+												point.x * normalToWidth,
+												point.y * normalToHeight -
+													hyperparams.ball.radius * normalToHeight * 1000,
+											);
+										}
+									}
+
+									if (resolvedState?.cue && resolvedState.cueBall) {
+										context.strokeStyle = "white";
+										context.fillStyle = "white";
+
+										context.beginPath();
+										context.arc(
+											resolvedState.cueBall.x * normalToWidth,
+											resolvedState.cueBall.y * normalToHeight,
+											hyperparams.ball.radius * normalToWidth * 1000,
+											0,
+											2 * Math.PI,
+										);
+										context.stroke();
+
+										const to: Vector2<"normalized"> = {
+											x:
+												(resolvedState.cueBall.x +
+													hitPowerRef.current *
+														height *
+														Math.cos(resolvedState.cue.angle)) *
+												normalToWidth,
+											y:
+												(resolvedState.cueBall.y +
+													hitPowerRef.current *
+														height *
+														Math.sin(resolvedState.cue.angle)) *
+												normalToHeight,
+										};
+
+										const headLength = width * 0.02;
+										context.lineWidth = width * 0.002;
+										context.beginPath();
+										context.moveTo(
+											resolvedState.cueBall.x * normalToWidth,
+											resolvedState.cueBall.y * normalToHeight,
+										);
+										context.lineTo(to.x, to.y);
+										context.stroke();
+
+										context.beginPath();
+										context.moveTo(to.x, to.y);
+										context.lineTo(
+											to.x -
+												headLength *
+													Math.cos(resolvedState.cue.angle - Math.PI / 6),
+											to.y -
+												headLength *
+													Math.sin(resolvedState.cue.angle - Math.PI / 6),
+										);
+										context.moveTo(to.x, to.y);
+										context.lineTo(
+											to.x -
+												headLength *
+													Math.cos(resolvedState.cue.angle + Math.PI / 6),
+											to.y -
+												headLength *
+													Math.sin(resolvedState.cue.angle + Math.PI / 6),
+										);
+										context.stroke();
+									}
+								}),
+							"정규화된 테이블 상태 시각화",
 						);
 					}
-					trajectoryPainter.drawTrajectories(trajectoryDrawerCanvas, snapshots);
-					textureTransformer.drawTransformed(
-						trajectoryDrawerCanvas,
-						overlayCanvas,
-						tableTransform.matrix.inverseTransform,
-					);
-				}
-			}
 
-			if (isExportFrameRef.current) {
-				exportFrameData(
-					overlayCanvas,
-					resizedFrameDebugCanvas,
-					tableMaskDebugCanvas,
-					cueMaskDebugCanvas,
-					detectionDebugCanvas,
-					normalizedTableDebugCanvas,
-					trajectoryDebugCanvas,
-				);
-				isExportFrameRef.current = false;
-			}
+					if (resolvedState?.cueBall) {
+						const cueBall = resolvedState.cueBall;
+
+						const [initialSnapshot, step] = measure(
+							() =>
+								simulator.simulate(
+									rerange(cueBall, 2844, 2.844),
+									resolvedState.objectBalls.map((p) => rerange(p, 2844, 2.844)),
+									resolvedState.cue.angle,
+									hitPowerRef.current,
+									hitPointRef.current,
+								),
+							"시뮬레이터 초기화",
+						);
+
+						const snapshots = [initialSnapshot];
+						measure(() => {
+							for (let i = 0; i < 600; i++) {
+								const snapshot = step();
+								snapshots.push(snapshot);
+							}
+						}, "시뮬레이션");
+
+						previousTableSnapshotsRef.current = snapshots;
+
+						if (import.meta.env.DEV) {
+							measure(
+								() =>
+									trajectoryPainter.drawTrajectories(
+										trajectoryDebugCanvas,
+										snapshots,
+									),
+								"Trajectory 생성 (디버그)",
+							);
+						}
+						measure(
+							() =>
+								trajectoryPainter.drawTrajectories(
+									trajectoryDrawerCanvas,
+									snapshots,
+								),
+							"Trajectory 생성 (오버레이)",
+						);
+						measure(
+							() =>
+								textureTransformer.drawTransformed(
+									trajectoryDrawerCanvas,
+									overlayCanvas,
+									tableTransform.matrix.inverseTransform,
+								),
+							"Trajectory 오버레이 적용",
+						);
+					}
+				}
+
+				if (isExportFrameRef.current) {
+					exportFrameData(
+						overlayCanvas,
+						resizedFrameDebugCanvas,
+						tableMaskDebugCanvas,
+						cueMaskDebugCanvas,
+						detectionDebugCanvas,
+						normalizedTableDebugCanvas,
+						trajectoryDebugCanvas,
+					);
+					isExportFrameRef.current = false;
+				}
+			}, "Main Loop");
 		},
 	);
 
@@ -855,8 +940,8 @@ function Main() {
 				/>
 			</div>
 
-			{/* 오버레이 */}
-			{/* NOTE: AR 비활성화 후 디버깅을 위해 꺼도 궤적 남아있도록 한 상태임. 나중에 UX개선을 한다면 isOverlayEnabled 을 조건에 추가해야함 */}
+			{/* TODO: 경고 우회 대신 방법 찾아보기 */}
+			{/* eslint-disable react-hooks/refs */}
 			{overlayCanvasSpec && (
 				<div
 					style={{
@@ -866,11 +951,7 @@ function Main() {
 					}}
 				>
 					<canvas
-						ref={(element) => {
-							if (element) {
-								overlayCanvasSpec.onMount(element);
-							}
-						}}
+						ref={overlayCanvasSpec.onMount}
 						width={overlayCanvasSpec.width}
 						height={overlayCanvasSpec.height}
 						style={{
@@ -922,11 +1003,7 @@ function Main() {
 						}}
 					>
 						<canvas
-							ref={(element) => {
-								if (element) {
-									spec.onMount(element);
-								}
-							}}
+							ref={spec.onMount}
 							width={spec.width}
 							height={spec.height}
 							style={{
