@@ -84,6 +84,9 @@ function exportFrameData(
 
 /**
  * 큐의 방향정보와 수구, 목적구 정보 분리
+ *
+ * 큐와의 거리 기반으로 수구, 목적구를 분리함. 큐의 끝점과 가장 가까운 공이 수구가 됨
+ *
  * @param cuePoints
  * @param ballPoints
  * @returns
@@ -96,35 +99,49 @@ function resolveTableState(
 	cueBall: Vector2<"normalized"> | null;
 	objectBalls: Vector2<"normalized">[];
 } {
+	// cue의 후보가 되는 선
 	let line: Line<"normalized"> = {
 		start: cuePoints[0],
 		end: cuePoints[1],
 	};
+	// cue ball의 후보가 되는 공
 	let cueBallCandidate: {
 		point: Vector2<"normalized">;
 		distance: number;
 	} | null = null;
+	// cue ball이 아닌거로 판정된 공들
 	const objectBalls: Vector2<"normalized">[] = [];
 
+	// 큐의 방향도 알지 못하므로 두 끝점을 전부 검사
 	for (const ballPoint of ballPoints) {
+		// 큐의 각 끝점에서 공과 떨어진 거리 계산
 		const distances = cuePoints.map((cuePoint) => dist(ballPoint, cuePoint));
+		// 두 거리 중 가장 가까운 큐의 끝점 인덱스
 		const cueTipIndex = argmin(distances);
+		// 가장 가까운 큐의 끝점과의 거리
 		const minDistance = distances[cueTipIndex];
 
 		if (cueBallCandidate === null || minDistance < cueBallCandidate.distance) {
+			// 처음 나온 공이거나 이전 수구 후보보다 더 가까운 경우
+
 			if (cueBallCandidate !== null) {
+				// 이전에 수구 후보였던 공은 이제 목적구로 간주
 				objectBalls.push(cueBallCandidate.point);
 			}
 
+			// 현재 공을 새로운 수구 후보로 설정
 			cueBallCandidate = {
 				point: ballPoint,
 				distance: minDistance,
 			};
+			// 현재 공과 가장 가까운 끝점으로 큐의 방향 재설정
 			line = {
 				start: cuePoints[1 - cueTipIndex],
 				end: cuePoints[cueTipIndex],
 			};
 		} else {
+			// 목적구로 간주
+
 			objectBalls.push(ballPoint);
 		}
 	}
