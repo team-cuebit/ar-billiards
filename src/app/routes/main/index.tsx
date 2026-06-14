@@ -12,13 +12,12 @@ import {
 	withMatScope,
 } from "@/common";
 import HitControlPanel from "@/components/hit-params-panel";
-import OverlayToggleButton from "@/components/overlay-toggle-button";
 import hyperparams from "@/config/hyperparams";
 import { vars } from "@/config/theme.css";
 import useDebugCanvas from "@/hooks/use-debug-canvas";
 import useGPUCanvas from "@/hooks/use-gpu-canvas";
 import type { FrameInfo } from "@/lib/capture";
-import Cuebit, { type BufferSet, type FrameResult } from "@/lib/cuebit";
+import Cuebit from "@/lib/cuebit";
 import logger from "@/lib/logger";
 import { device, onnx } from "@/lib/onnx";
 import {
@@ -40,6 +39,47 @@ function createOffscreenCanvasHandle(
 		canvas,
 		draw: (pass) => pass(context, width, height),
 	};
+}
+
+function exportFrameData(
+	overlayCanvas: CanvasHandle<"webgpu">,
+	resizedFrameDebugCanvas: CanvasHandle<"webgpu">,
+	tableMaskDebugCanvas: CanvasHandle<"webgpu">,
+	cueMaskDebugCanvas: CanvasHandle<"webgpu">,
+	detectionDebugCanvas: CanvasHandle<"2d">,
+	normalizedTableDebugCanvas: CanvasHandle<"2d">,
+	trajectoryDebugCanvas: CanvasHandle<"2d">,
+) {
+	resizedFrameDebugCanvas.draw((device, context, _width, _height) => {
+		exportGPUTextureToPNG(
+			device,
+			context.getCurrentTexture(),
+			"resized_frame.png",
+		);
+	});
+	tableMaskDebugCanvas.draw((device, context, _width, _height) => {
+		exportGPUTextureToPNG(
+			device,
+			context.getCurrentTexture(),
+			"table_mask.png",
+		);
+	});
+	cueMaskDebugCanvas.draw((device, context, _width, _height) => {
+		exportGPUTextureToPNG(device, context.getCurrentTexture(), "cue_mask.png");
+	});
+	exportCanvasToPNG(detectionDebugCanvas.canvas, "detection_result.png");
+	exportCanvasToPNG(
+		normalizedTableDebugCanvas.canvas,
+		"normalized_detection_result.png",
+	);
+	exportCanvasToPNG(trajectoryDebugCanvas.canvas, "trajectory.png");
+	overlayCanvas.draw((device, context, _width, _height) => {
+		exportGPUTextureToPNG(
+			device,
+			context.getCurrentTexture(),
+			"trajectory_overlay.png",
+		);
+	});
 }
 
 /**
@@ -133,9 +173,9 @@ function Main() {
 	const isExportFrameRef = useRef(false);
 
 	const loop = useEffectEvent(
-		(
-			result: FrameResult,
-			bufferSet: BufferSet,
+		async (
+			cuebit: Cuebit,
+			video: HTMLVideoElement,
 			simulator: Simulator,
 			trajectoryDrawerCanvas: CanvasHandle<"2d">,
 			overlayCanvas: CanvasHandle<"webgpu">,
@@ -148,9 +188,11 @@ function Main() {
 			normalizedTableDebugCanvas: CanvasHandle<"2d">,
 			trajectoryDebugCanvas: CanvasHandle<"2d">,
 		) => {
-			if (!isOverlayEnabled) {
-				return;
-			}
+			const result = isOverlayEnabled
+				? await measure(() => cuebit.process(video), "Process Frame")
+				: null;
+			const bufferIndex = cuebit.getCurrentBufferIndex();
+			const bufferSet = cuebit.getBuffer(bufferIndex);
 
 			drawTexture(resizedFrameDebugCanvas, bufferSet.resizedFrameTexture);
 			drawTexture(tableMaskDebugCanvas, bufferSet.tableMaskFrameTexture);
@@ -168,7 +210,7 @@ function Main() {
 
 				context.clearRect(0, 0, width, height);
 
-				if (result.table) {
+				if (result?.table) {
 					context.strokeStyle = "blue";
 					context.lineWidth = width * 0.002;
 
@@ -249,7 +291,7 @@ function Main() {
 					}
 				}
 
-				if (result.cue) {
+				if (result?.cue) {
 					context.strokeStyle = "blue";
 					context.lineWidth = width * 0.002;
 
@@ -309,8 +351,8 @@ function Main() {
 				}
 			});
 
-			const tableTransform = result.table?.transform;
-			const cuePoints = result.cue?.approximation?.endpoints;
+			const tableTransform = result?.table?.transform;
+			const cuePoints = result?.cue?.approximation?.endpoints;
 			if (tableTransform && cuePoints) {
 				const normalizedBallPoints = withMatScope((track) => {
 					const src = track(
@@ -488,53 +530,19 @@ function Main() {
 					);
 				}
 			}
-		},
-	);
 
-	const exportFrameData = useEffectEvent(
-		(
-			overlayCanvas: CanvasHandle<"webgpu">,
-			resizedFrameDebugCanvas: CanvasHandle<"webgpu">,
-			tableMaskDebugCanvas: CanvasHandle<"webgpu">,
-			cueMaskDebugCanvas: CanvasHandle<"webgpu">,
-			detectionDebugCanvas: CanvasHandle<"2d">,
-			normalizedTableDebugCanvas: CanvasHandle<"2d">,
-			trajectoryDebugCanvas: CanvasHandle<"2d">,
-		) => {
-			resizedFrameDebugCanvas.draw((device, context, _width, _height) => {
-				exportGPUTextureToPNG(
-					device,
-					context.getCurrentTexture(),
-					"resized_frame.png",
+			if (isExportFrameRef.current) {
+				exportFrameData(
+					overlayCanvas,
+					resizedFrameDebugCanvas,
+					tableMaskDebugCanvas,
+					cueMaskDebugCanvas,
+					detectionDebugCanvas,
+					normalizedTableDebugCanvas,
+					trajectoryDebugCanvas,
 				);
-			});
-			tableMaskDebugCanvas.draw((device, context, _width, _height) => {
-				exportGPUTextureToPNG(
-					device,
-					context.getCurrentTexture(),
-					"table_mask.png",
-				);
-			});
-			cueMaskDebugCanvas.draw((device, context, _width, _height) => {
-				exportGPUTextureToPNG(
-					device,
-					context.getCurrentTexture(),
-					"cue_mask.png",
-				);
-			});
-			exportCanvasToPNG(detectionDebugCanvas.canvas, "detection_result.png");
-			exportCanvasToPNG(
-				normalizedTableDebugCanvas.canvas,
-				"normalized_detection_result.png",
-			);
-			exportCanvasToPNG(trajectoryDebugCanvas.canvas, "trajectory.png");
-			overlayCanvas.draw((device, context, _width, _height) => {
-				exportGPUTextureToPNG(
-					device,
-					context.getCurrentTexture(),
-					"trajectory_overlay.png",
-				);
-			});
+				isExportFrameRef.current = false;
+			}
 		},
 	);
 
@@ -704,15 +712,9 @@ function Main() {
 					if (!busy) {
 						busy = true;
 
-						const result = await measure(
-							() => cuebit.process(video),
-							"Process Frame",
-						);
-						const bufferIndex = cuebit.getCurrentBufferIndex();
-						const bufferSet = cuebit.getBuffer(bufferIndex);
-						loop(
-							result,
-							bufferSet,
+						await loop(
+							cuebit,
+							video,
 							simulator,
 							trajectoryDrawerCanvas,
 							overlayCanvas,
@@ -726,19 +728,6 @@ function Main() {
 							trajectoryDebugCanvas,
 						);
 						busy = false;
-					}
-
-					if (isExportFrameRef.current) {
-						exportFrameData(
-							overlayCanvas,
-							resizedFrameDebugCanvas,
-							tableMaskDebugCanvas,
-							cueMaskDebugCanvas,
-							detectionDebugCanvas,
-							normalizedTableDebugCanvas,
-							trajectoryDebugCanvas,
-						);
-						isExportFrameRef.current = false;
 					}
 					video.requestVideoFrameCallback(tick);
 				};
@@ -987,7 +976,7 @@ function Main() {
 						width: "100%",
 						height: "auto",
 						overflow: "hidden",
-                        opacity: isControlUiHidden ? 0 : 1,
+						opacity: isControlUiHidden ? 0 : 1,
 						transition: "opacity 0.2s ease-out",
 					}}
 				>
