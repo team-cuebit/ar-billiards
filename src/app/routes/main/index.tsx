@@ -228,162 +228,167 @@ function Main() {
 			const bufferIndex = cuebit.getCurrentBufferIndex();
 			const bufferSet = cuebit.getBuffer(bufferIndex);
 
-			drawTexture(resizedFrameDebugCanvas, bufferSet.resizedFrameTexture);
-			drawTexture(tableMaskDebugCanvas, bufferSet.tableMaskFrameTexture);
-			drawTexture(cueMaskDebugCanvas, bufferSet.cueMaskFrameTexture);
+			if (import.meta.env.DEV) {
+				drawTexture(resizedFrameDebugCanvas, bufferSet.resizedFrameTexture);
+				drawTexture(tableMaskDebugCanvas, bufferSet.tableMaskFrameTexture);
+				drawTexture(cueMaskDebugCanvas, bufferSet.cueMaskFrameTexture);
 
-			detectionDebugCanvas.draw((context, width, height) => {
-				const protoToCanvasX =
-					width / onnx.segementation.output.fetchs.protos.width;
-				const protoToCanvasY =
-					height / onnx.segementation.output.fetchs.protos.height;
-				const feedToCanvasX =
-					width / onnx.segementation.input.feeds.image.width;
-				const feedToCanvasY =
-					height / onnx.segementation.input.feeds.image.height;
+				detectionDebugCanvas.draw((context, width, height) => {
+					const protoToCanvasX =
+						width / onnx.segementation.output.fetchs.protos.width;
+					const protoToCanvasY =
+						height / onnx.segementation.output.fetchs.protos.height;
+					const feedToCanvasX =
+						width / onnx.segementation.input.feeds.image.width;
+					const feedToCanvasY =
+						height / onnx.segementation.input.feeds.image.height;
 
-				context.clearRect(0, 0, width, height);
+					context.clearRect(0, 0, width, height);
 
-				if (result?.table) {
-					context.strokeStyle = "blue";
-					context.lineWidth = width * 0.002;
-
-					context.beginPath();
-
-					context.fillText(
-						"table",
-						((result.table.approximation.mask.detection.bbox.lt.x +
-							result.table.approximation.mask.detection.bbox.rb.x) /
-							2) *
-							feedToCanvasX,
-						result.table.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
-					);
-
-					context.rect(
-						result.table.approximation.mask.detection.bbox.lt.x * feedToCanvasX,
-						result.table.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
-						(result.table.approximation.mask.detection.bbox.rb.x -
-							result.table.approximation.mask.detection.bbox.lt.x) *
-							feedToCanvasX,
-						(result.table.approximation.mask.detection.bbox.rb.y -
-							result.table.approximation.mask.detection.bbox.lt.y) *
-							feedToCanvasY,
-					);
-					context.stroke();
-
-					context.strokeStyle = "rgb(0, 255, 255, 0.8)";
-					context.lineWidth = width * 0.01;
-					for (const point of result.table.approximation.lines) {
-						context.beginPath();
-						context.moveTo(
-							point.start.x * protoToCanvasX,
-							point.start.y * protoToCanvasY,
-						);
-						context.lineTo(
-							point.end.x * protoToCanvasX,
-							point.end.y * protoToCanvasY,
-						);
-
-						context.stroke();
-					}
-
-					if (result.table.transform) {
-						context.strokeStyle = "red";
-						context.lineWidth = width * 0.005;
-						context.font = `${width * 0.02}px Arial`;
-						context.fillStyle = "red";
-						context.textAlign = "center";
-						context.textBaseline = "bottom";
-
-						context.beginPath();
-
-						const points = [
-							result.table.transform.quad.points.topLeft,
-							result.table.transform.quad.points.bottomLeft,
-							result.table.transform.quad.points.bottomRight,
-							result.table.transform.quad.points.topRight,
-						];
-
-						for (let i = 0; i < 4; i++) {
-							const point = points[i];
-							context.fillText(
-								`${i}`,
-								point.x * protoToCanvasX,
-								point.y * protoToCanvasY,
-							);
-							context.moveTo(
-								point.x * protoToCanvasX,
-								point.y * protoToCanvasY,
-							);
-							const nextPoint = points[(i + 1) % 4];
-							context.lineTo(
-								nextPoint.x * protoToCanvasX,
-								nextPoint.y * protoToCanvasY,
-							);
-						}
-						context.stroke();
-					}
-				}
-
-				if (result?.cue) {
-					context.strokeStyle = "blue";
-					context.lineWidth = width * 0.002;
-
-					context.beginPath();
-
-					context.fillText(
-						"cue",
-						((result.cue.approximation.mask.detection.bbox.lt.x +
-							result.cue.approximation.mask.detection.bbox.rb.x) /
-							2) *
-							feedToCanvasX,
-						result.cue.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
-					);
-
-					context.rect(
-						result.cue.approximation.mask.detection.bbox.lt.x * feedToCanvasX,
-						result.cue.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
-						(result.cue.approximation.mask.detection.bbox.rb.x -
-							result.cue.approximation.mask.detection.bbox.lt.x) *
-							feedToCanvasX,
-						(result.cue.approximation.mask.detection.bbox.rb.y -
-							result.cue.approximation.mask.detection.bbox.lt.y) *
-							feedToCanvasY,
-					);
-					context.stroke();
-
-					if (result.cue.approximation.endpoints) {
-						context.strokeStyle = "white";
+					if (result?.table) {
+						context.strokeStyle = "blue";
 						context.lineWidth = width * 0.002;
 
 						context.beginPath();
-						context.moveTo(
-							result.cue.approximation.endpoints[0].x * protoToCanvasX,
-							result.cue.approximation.endpoints[0].y * protoToCanvasY,
+
+						context.fillText(
+							"table",
+							((result.table.approximation.mask.detection.bbox.lt.x +
+								result.table.approximation.mask.detection.bbox.rb.x) /
+								2) *
+								feedToCanvasX,
+							result.table.approximation.mask.detection.bbox.lt.y *
+								feedToCanvasY,
 						);
-						context.lineTo(
-							result.cue.approximation.endpoints[1].x * protoToCanvasX,
-							result.cue.approximation.endpoints[1].y * protoToCanvasY,
+
+						context.rect(
+							result.table.approximation.mask.detection.bbox.lt.x *
+								feedToCanvasX,
+							result.table.approximation.mask.detection.bbox.lt.y *
+								feedToCanvasY,
+							(result.table.approximation.mask.detection.bbox.rb.x -
+								result.table.approximation.mask.detection.bbox.lt.x) *
+								feedToCanvasX,
+							(result.table.approximation.mask.detection.bbox.rb.y -
+								result.table.approximation.mask.detection.bbox.lt.y) *
+								feedToCanvasY,
 						);
 						context.stroke();
+
+						context.strokeStyle = "rgb(0, 255, 255, 0.8)";
+						context.lineWidth = width * 0.01;
+						for (const point of result.table.approximation.lines) {
+							context.beginPath();
+							context.moveTo(
+								point.start.x * protoToCanvasX,
+								point.start.y * protoToCanvasY,
+							);
+							context.lineTo(
+								point.end.x * protoToCanvasX,
+								point.end.y * protoToCanvasY,
+							);
+
+							context.stroke();
+						}
+
+						if (result.table.transform) {
+							context.strokeStyle = "red";
+							context.lineWidth = width * 0.005;
+							context.font = `${width * 0.02}px Arial`;
+							context.fillStyle = "red";
+							context.textAlign = "center";
+							context.textBaseline = "bottom";
+
+							context.beginPath();
+
+							const points = [
+								result.table.transform.quad.points.topLeft,
+								result.table.transform.quad.points.bottomLeft,
+								result.table.transform.quad.points.bottomRight,
+								result.table.transform.quad.points.topRight,
+							];
+
+							for (let i = 0; i < 4; i++) {
+								const point = points[i];
+								context.fillText(
+									`${i}`,
+									point.x * protoToCanvasX,
+									point.y * protoToCanvasY,
+								);
+								context.moveTo(
+									point.x * protoToCanvasX,
+									point.y * protoToCanvasY,
+								);
+								const nextPoint = points[(i + 1) % 4];
+								context.lineTo(
+									nextPoint.x * protoToCanvasX,
+									nextPoint.y * protoToCanvasY,
+								);
+							}
+							context.stroke();
+						}
 					}
 
-					context.strokeStyle = "blue";
-					context.lineWidth = width * 0.002;
+					if (result?.cue) {
+						context.strokeStyle = "blue";
+						context.lineWidth = width * 0.002;
 
-					for (const ball of result.ballPoints) {
 						context.beginPath();
-						context.arc(
-							ball.x * protoToCanvasX,
-							ball.y * protoToCanvasY,
-							width * 0.02,
-							0,
-							2 * Math.PI,
+
+						context.fillText(
+							"cue",
+							((result.cue.approximation.mask.detection.bbox.lt.x +
+								result.cue.approximation.mask.detection.bbox.rb.x) /
+								2) *
+								feedToCanvasX,
+							result.cue.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
+						);
+
+						context.rect(
+							result.cue.approximation.mask.detection.bbox.lt.x * feedToCanvasX,
+							result.cue.approximation.mask.detection.bbox.lt.y * feedToCanvasY,
+							(result.cue.approximation.mask.detection.bbox.rb.x -
+								result.cue.approximation.mask.detection.bbox.lt.x) *
+								feedToCanvasX,
+							(result.cue.approximation.mask.detection.bbox.rb.y -
+								result.cue.approximation.mask.detection.bbox.lt.y) *
+								feedToCanvasY,
 						);
 						context.stroke();
+
+						if (result.cue.approximation.endpoints) {
+							context.strokeStyle = "white";
+							context.lineWidth = width * 0.002;
+
+							context.beginPath();
+							context.moveTo(
+								result.cue.approximation.endpoints[0].x * protoToCanvasX,
+								result.cue.approximation.endpoints[0].y * protoToCanvasY,
+							);
+							context.lineTo(
+								result.cue.approximation.endpoints[1].x * protoToCanvasX,
+								result.cue.approximation.endpoints[1].y * protoToCanvasY,
+							);
+							context.stroke();
+						}
+
+						context.strokeStyle = "blue";
+						context.lineWidth = width * 0.002;
+
+						for (const ball of result.ballPoints) {
+							context.beginPath();
+							context.arc(
+								ball.x * protoToCanvasX,
+								ball.y * protoToCanvasY,
+								width * 0.02,
+								0,
+								2 * Math.PI,
+							);
+							context.stroke();
+						}
 					}
-				}
-			});
+				});
+			}
 
 			const tableTransform = result?.table?.transform;
 			const cuePoints = result?.cue?.approximation?.endpoints;
@@ -459,98 +464,100 @@ function Main() {
 					normalizedCuePoints &&
 					resolveTableState(normalizedCuePoints, normalizedBallPoints);
 
-				normalizedTableDebugCanvas.draw((context, width, height) => {
-					const normalToWidth = width / 2844;
-					const normalToHeight = height / 1422;
+				if (import.meta.env.DEV) {
+					normalizedTableDebugCanvas.draw((context, width, height) => {
+						const normalToWidth = width / 2844;
+						const normalToHeight = height / 1422;
 
-					context.clearRect(0, 0, width, height);
-					context.lineWidth = width * 0.004;
-					context.font = `${width * 0.02}px Arial`;
-					context.textAlign = "center";
-					context.textBaseline = "bottom";
+						context.clearRect(0, 0, width, height);
+						context.lineWidth = width * 0.004;
+						context.font = `${width * 0.02}px Arial`;
+						context.textAlign = "center";
+						context.textBaseline = "bottom";
 
-					if (resolvedState?.objectBalls) {
-						context.strokeStyle = "red";
-						context.fillStyle = "red";
-						for (let i = 0; i < resolvedState.objectBalls.length; i++) {
-							const point = resolvedState.objectBalls[i];
+						if (resolvedState?.objectBalls) {
+							context.strokeStyle = "red";
+							context.fillStyle = "red";
+							for (let i = 0; i < resolvedState.objectBalls.length; i++) {
+								const point = resolvedState.objectBalls[i];
+
+								context.beginPath();
+								context.arc(
+									point.x * normalToWidth,
+									point.y * normalToHeight,
+									hyperparams.ball.radius * normalToWidth * 1000,
+									0,
+									2 * Math.PI,
+								);
+								context.stroke();
+
+								context.fillText(
+									`ball ${i}`,
+									point.x * normalToWidth,
+									point.y * normalToHeight -
+										hyperparams.ball.radius * normalToHeight * 1000,
+								);
+							}
+						}
+
+						if (resolvedState?.cue && resolvedState.cueBall) {
+							context.strokeStyle = "white";
+							context.fillStyle = "white";
 
 							context.beginPath();
 							context.arc(
-								point.x * normalToWidth,
-								point.y * normalToHeight,
+								resolvedState.cueBall.x * normalToWidth,
+								resolvedState.cueBall.y * normalToHeight,
 								hyperparams.ball.radius * normalToWidth * 1000,
 								0,
 								2 * Math.PI,
 							);
 							context.stroke();
 
-							context.fillText(
-								`ball ${i}`,
-								point.x * normalToWidth,
-								point.y * normalToHeight -
-									hyperparams.ball.radius * normalToHeight * 1000,
+							const to: Vector2<"normalized"> = {
+								x:
+									(resolvedState.cueBall.x +
+										hitPowerRef.current *
+											height *
+											Math.cos(resolvedState.cue.angle)) *
+									normalToWidth,
+								y:
+									(resolvedState.cueBall.y +
+										hitPowerRef.current *
+											height *
+											Math.sin(resolvedState.cue.angle)) *
+									normalToHeight,
+							};
+
+							const headLength = width * 0.02;
+							context.lineWidth = width * 0.002;
+							context.beginPath();
+							context.moveTo(
+								resolvedState.cueBall.x * normalToWidth,
+								resolvedState.cueBall.y * normalToHeight,
 							);
+							context.lineTo(to.x, to.y);
+							context.stroke();
+
+							context.beginPath();
+							context.moveTo(to.x, to.y);
+							context.lineTo(
+								to.x -
+									headLength * Math.cos(resolvedState.cue.angle - Math.PI / 6),
+								to.y -
+									headLength * Math.sin(resolvedState.cue.angle - Math.PI / 6),
+							);
+							context.moveTo(to.x, to.y);
+							context.lineTo(
+								to.x -
+									headLength * Math.cos(resolvedState.cue.angle + Math.PI / 6),
+								to.y -
+									headLength * Math.sin(resolvedState.cue.angle + Math.PI / 6),
+							);
+							context.stroke();
 						}
-					}
-
-					if (resolvedState?.cue && resolvedState.cueBall) {
-						context.strokeStyle = "white";
-						context.fillStyle = "white";
-
-						context.beginPath();
-						context.arc(
-							resolvedState.cueBall.x * normalToWidth,
-							resolvedState.cueBall.y * normalToHeight,
-							hyperparams.ball.radius * normalToWidth * 1000,
-							0,
-							2 * Math.PI,
-						);
-						context.stroke();
-
-						const to: Vector2<"normalized"> = {
-							x:
-								(resolvedState.cueBall.x +
-									hitPowerRef.current *
-										height *
-										Math.cos(resolvedState.cue.angle)) *
-								normalToWidth,
-							y:
-								(resolvedState.cueBall.y +
-									hitPowerRef.current *
-										height *
-										Math.sin(resolvedState.cue.angle)) *
-								normalToHeight,
-						};
-
-						const headLength = width * 0.02;
-						context.lineWidth = width * 0.002;
-						context.beginPath();
-						context.moveTo(
-							resolvedState.cueBall.x * normalToWidth,
-							resolvedState.cueBall.y * normalToHeight,
-						);
-						context.lineTo(to.x, to.y);
-						context.stroke();
-
-						context.beginPath();
-						context.moveTo(to.x, to.y);
-						context.lineTo(
-							to.x -
-								headLength * Math.cos(resolvedState.cue.angle - Math.PI / 6),
-							to.y -
-								headLength * Math.sin(resolvedState.cue.angle - Math.PI / 6),
-						);
-						context.moveTo(to.x, to.y);
-						context.lineTo(
-							to.x -
-								headLength * Math.cos(resolvedState.cue.angle + Math.PI / 6),
-							to.y -
-								headLength * Math.sin(resolvedState.cue.angle + Math.PI / 6),
-						);
-						context.stroke();
-					}
-				});
+					});
+				}
 
 				if (resolvedState?.cueBall) {
 					const [initialSnapshot, step] = simulator.simulate(
@@ -571,7 +578,12 @@ function Main() {
 
 					previousTableSnapshotsRef.current = snapshots;
 
-					trajectoryPainter.drawTrajectories(trajectoryDebugCanvas, snapshots);
+					if (import.meta.env.DEV) {
+						trajectoryPainter.drawTrajectories(
+							trajectoryDebugCanvas,
+							snapshots,
+						);
+					}
 					trajectoryPainter.drawTrajectories(trajectoryDrawerCanvas, snapshots);
 					textureTransformer.drawTransformed(
 						trajectoryDrawerCanvas,
