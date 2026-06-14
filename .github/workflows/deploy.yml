@@ -44,7 +44,7 @@ jobs:
         run: pnpm run build
         env:
           VITE_APP_VERSION: ${{ github.ref_name }}
-          VITE_BASE_PATH: /cue-bit/
+          VITE_BASE_PATH: /ar-billiards/
 
       - name: GitHub Pages 환경 설정
         uses: actions/configure-pages@v5
