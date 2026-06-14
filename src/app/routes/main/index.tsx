@@ -206,6 +206,8 @@ function Main() {
 	const isExportFrameRef = useRef(false);
 	const previousTableSnapshotsRef = useRef<TableSnapshot[]>([]);
 
+	const [processingDelay, setProcessingDelay] = useState<number | null>(null);
+
 	const loop = useEffectEvent(
 		async (
 			cuebit: Cuebit,
@@ -774,6 +776,7 @@ function Main() {
 					if (!busy) {
 						busy = true;
 
+						const start = performance.now();
 						await loop(
 							cuebit,
 							video,
@@ -790,6 +793,8 @@ function Main() {
 							trajectoryDebugCanvas,
 						);
 						busy = false;
+						const end = performance.now();
+						setProcessingDelay(end - start);
 					}
 					video.requestVideoFrameCallback(tick);
 				};
@@ -1130,8 +1135,26 @@ function Main() {
 				</div>
 			)}
 
-			{/* 개발용 로그 패널 (개발 환경에서만 표시) */}
-			{/* <DevLog /> */}
+			<div
+				style={{
+					position: "absolute",
+					top: 16,
+					right: 16,
+					padding: "8px 8px",
+					width: "auto",
+					height: "auto",
+					fontFamily: vars.font.mono,
+					backgroundColor: "rgba(0, 0, 0, 0.5)",
+					display: "grid",
+					gridTemplateColumns: "auto auto",
+					columnGap: "1em",
+				}}
+			>
+				<span>Overlay FPS:</span>
+				<span></span>
+				<span>Delay:</span>
+				<span>{processingDelay?.toFixed(2)} ms</span>
+			</div>
 		</div>
 	);
 }

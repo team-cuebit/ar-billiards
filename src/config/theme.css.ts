@@ -1,4 +1,6 @@
 import { createTheme } from "@vanilla-extract/css";
+import "@fontsource/jetbrains-mono";
+import "pretendard/dist/web/variable/pretendardvariable.css";
 
 export const [theme, vars] = createTheme({
 	color: {
@@ -7,16 +9,17 @@ export const [theme, vars] = createTheme({
 		surface: "#222",
 		onSurface: "white",
 		text: "white",
-        textAccent: "#00e5ff",
+		textAccent: "#00e5ff",
 	},
 	font: {
 		body: `"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif`,
+		mono: `"JetBrains Mono", Consolas, monospace`,
 	},
-    fontSize: {
-        body: "16px",
-        title: "24px",
-        subtitle: "12px",
-    },
+	fontSize: {
+		body: "16px",
+		title: "24px",
+		subtitle: "12px",
+	},
 	browser: {
 		colorScheme: "dark",
 	},

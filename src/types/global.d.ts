@@ -3,6 +3,11 @@ import type { Quaternion, Vector3 } from "@dimforge/rapier3d";
 declare module "*.wgsl";
 
 declare global {
+	// https://fontsource.org/docs/getting-started/install#4-typescript-configuration
+	declare module "*.css";
+	declare module "@fontsource/*" {}
+	declare module "@fontsource-variable/*" {}
+
 	type ContextMap = {
 		"2d": CanvasRenderingContext2D;
 		webgpu: GPUCanvasContext;
@@ -87,9 +92,9 @@ declare global {
 		readonly objectBalls: BallSnapshot[];
 	};
 
-    /**
-     * 단일 공의 궤적 정보
-     */
+	/**
+	 * 단일 공의 궤적 정보
+	 */
 	type BallTrajectory = {
 		readonly snapshots: BallSnapshot[];
 	};
