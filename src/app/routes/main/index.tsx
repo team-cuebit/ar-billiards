@@ -28,6 +28,12 @@ import {
 import Simulator from "@/lib/simulator";
 import { animation, styles } from "./index.css";
 
+/**
+ * OffscreenCanvas와 그 컨텍스트를 관리하는 핸들 객체 생성 헬퍼
+ * @param width
+ * @param height
+ * @returns
+ */
 function createOffscreenCanvasHandle(
 	width: number,
 	height: number,
@@ -41,6 +47,16 @@ function createOffscreenCanvasHandle(
 	};
 }
 
+/**
+ * 프레임 데이터 저장
+ * @param overlayCanvas
+ * @param resizedFrameDebugCanvas
+ * @param tableMaskDebugCanvas
+ * @param cueMaskDebugCanvas
+ * @param detectionDebugCanvas
+ * @param normalizedTableDebugCanvas
+ * @param trajectoryDebugCanvas
+ */
 function exportFrameData(
 	overlayCanvas: CanvasHandle<"webgpu">,
 	resizedFrameDebugCanvas: CanvasHandle<"webgpu">,
@@ -188,6 +204,7 @@ function Main() {
 	const [isControlUiHidden, setIsControlUiHidden] = useState(false);
 
 	const isExportFrameRef = useRef(false);
+	const previousTableSnapshotsRef = useRef<TableSnapshot[]>([]);
 
 	const loop = useEffectEvent(
 		async (
@@ -370,7 +387,21 @@ function Main() {
 
 			const tableTransform = result?.table?.transform;
 			const cuePoints = result?.cue?.approximation?.endpoints;
-			if (tableTransform && cuePoints) {
+			if (isControlUiHidden && tableTransform) {
+				trajectoryPainter.drawTrajectories(
+					trajectoryDebugCanvas,
+					previousTableSnapshotsRef.current,
+				);
+				trajectoryPainter.drawTrajectories(
+					trajectoryDrawerCanvas,
+					previousTableSnapshotsRef.current,
+				);
+				textureTransformer.drawTransformed(
+					trajectoryDrawerCanvas,
+					overlayCanvas,
+					tableTransform.matrix.inverseTransform,
+				);
+			} else if (tableTransform && cuePoints) {
 				const normalizedBallPoints = withMatScope((track) => {
 					const src = track(
 						cv.matFromArray(
@@ -537,6 +568,8 @@ function Main() {
 							snapshots.push(snapshot);
 						}
 					}, "Simulate Trajectory");
+
+					previousTableSnapshotsRef.current = snapshots;
 
 					trajectoryPainter.drawTrajectories(trajectoryDebugCanvas, snapshots);
 					trajectoryPainter.drawTrajectories(trajectoryDrawerCanvas, snapshots);
@@ -995,6 +1028,7 @@ function Main() {
 						overflow: "hidden",
 						opacity: isControlUiHidden ? 0 : 1,
 						transition: "opacity 0.2s ease-out",
+						boxShadow: "0 4px 24px rgba(0, 0, 0, 0.3)",
 					}}
 				>
 					<HitControlPanel
