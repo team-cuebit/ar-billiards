@@ -13,7 +13,7 @@ globalStyle("html, body", {
 globalStyle("button", {
 	width: "auto",
 	height: "auto",
-	padding: "8px 0px",
+	padding: "8px 12px",
 	fontWeight: "bold",
 	borderRadius: "8px",
 	cursor: "pointer",

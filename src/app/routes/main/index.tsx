@@ -1146,8 +1146,9 @@ function Main() {
 						type="button"
 						className={styles.button}
 						style={{
-							transition: "flex 0.2s ease-out",
+							transition: "flex 0.2s ease-out, padding 0.2s ease-out",
 							flex: isOverlayEnabled ? 1 : 0,
+							...(!isOverlayEnabled ? { padding: "0px" } : {}),
 						}}
 						onClick={() => setIsControlUiHidden((prev) => !prev)}
 					>
@@ -1157,8 +1158,10 @@ function Main() {
 						type="button"
 						className={styles.button}
 						style={{
-							transition: "flex 0.2s ease-out, background 0.2s ease-out",
+							transition:
+								"flex 0.2s ease-out, background 0.2s ease-out, padding 0.2s ease-out",
 							flex: isControlUiHidden ? 0 : 1,
+							...(isControlUiHidden ? { padding: "0px" } : {}),
 							...(isOverlayEnabled
 								? {
 										background: "rgba(255, 71, 87, 0.2)",
