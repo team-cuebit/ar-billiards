@@ -5,4 +5,7 @@ export const paths = {
 	physics: {
 		path: "/physics",
 	},
+	game: {
+		path: "/game",
+	},
 } as const;

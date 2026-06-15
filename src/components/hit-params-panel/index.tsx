@@ -29,7 +29,7 @@ type HitControlPanelProps = {
  */
 function HitControlPanel(props: HitControlPanelProps) {
 	const [hitPoint, setHitPoint] = useState<Vector2<"unit">>({ x: 0, y: 0 });
-	const [hitPower, setHitPower] = useState(0.5);
+	const [hitPower, setHitPower] = useState(1.5);
 	const [hitAngle, setHitAngle] = useState(0);
 
 	const onHitPointChange = useCallback<PointerEventHandler<HTMLDivElement>>(
@@ -102,7 +102,7 @@ function HitControlPanel(props: HitControlPanelProps) {
 					}}
 					type="range"
 					min="0"
-					max="2"
+					max="4"
 					step="0.001"
 					value={hitPower}
 					onChange={onHitPowerChange}

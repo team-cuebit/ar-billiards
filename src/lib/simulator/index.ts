@@ -105,7 +105,7 @@ class Simulator {
 		const collider = this.world.createCollider(
 			RAPIER.ColliderDesc.cuboid(halfSize.x, halfSize.y, halfSize.z)
 				.setRestitution(0.5)
-				.setFriction(0.2),
+				.setFriction(0.4),
 			rigidbody,
 		);
 
@@ -117,7 +117,7 @@ class Simulator {
 			RAPIER.RigidBodyDesc.dynamic()
 				.setCcdEnabled(true)
 				.setLinearDamping(0.2)
-				.setAngularDamping(0.2)
+				.setAngularDamping(2)
 				.setTranslation(0, 0, 0)
 				.setCanSleep(false),
 		);
@@ -264,19 +264,69 @@ class Simulator {
 			true,
 		);
 
+		// 시뮬레이션에 참여하는 공만 substep 속도 계산에 사용한다.
+		// (비활성 공은 y=-100에서 중력으로 무한 낙하해 속도가 계속 커지므로 제외)
+		const activeBalls = [
+			this.cueBall,
+			...this.objectBalls.slice(0, objectBallPositions.length),
+		];
+
 		return [
 			initialSnapshot,
 			() => {
-				// this.applyRollingResistance(this.cueBall);
-				// this.objectBalls.forEach(this.applyRollingResistance.bind(this));
-				this.world.step(this.eventQueue);
+				// 세게 칠수록 한 스텝(1/240s) 변위가 공 반지름을 넘어가는데,
+				// 그러면 공이 다른 공/쿠션을 깊게 파고든 뒤 솔버의 침투 보정이
+				// 이를 밀어내면서 에너지가 다시 주입돼 "속도가 줄었다 다시 증가"한다.
+				// 한 스텝 변위가 반지름의 일정 비율을 넘지 않도록 substep으로 쪼갠다.
+				const r = this.config.ball.radius;
+				const dt = this.config.physics.timeStep;
+				let maxSpeed = 0;
+				for (const ball of activeBalls) {
+					const v = ball.rigidbody.linvel();
+					maxSpeed = Math.max(maxSpeed, Math.hypot(v.x, v.y, v.z));
+				}
+				const maxDispPerStep = r * 0.25;
+				const substeps = Math.min(
+					8,
+					Math.max(1, Math.ceil((maxSpeed * dt) / maxDispPerStep)),
+				);
+				// 총 진행 시간은 dt로 동일하게 유지하면서 침투 깊이만 줄인다.
+				this.world.timestep = dt / substeps;
 
 				const collidedHandles = new Set<number>();
-				this.eventQueue.drainCollisionEvents((h1, h2, started) => {
-					if (!started) return;
-					collidedHandles.add(h1);
-					collidedHandles.add(h2);
-				});
+				for (let i = 0; i < substeps; i++) {
+					this.world.step(this.eventQueue);
+					this.eventQueue.drainCollisionEvents((h1, h2, started) => {
+						if (!started) return;
+						collidedHandles.add(h1);
+						collidedHandles.add(h2);
+					});
+				}
+
+				// 지수 감쇠(damping)만으로는 감속량이 속도에 비례해 저속에서
+				// 무한히 기어간다. 속도와 무관한 "일정 감속(구름 저항)"을 더해
+				// 유한 시간에 멈추게 하고, 임계 속도 이하면 완전히 정지시킨다.
+				const decel = this.config.physics.rollingFriction * 9.81; // m/s^2
+				const STOP_SPEED = 0.05; // 이 속도(m/s) 이하면 정지로 간주
+				for (const ball of activeBalls) {
+					const v = ball.rigidbody.linvel();
+					const speed = Math.hypot(v.x, v.z);
+					if (speed < 1e-6) continue;
+					const next = speed - decel * dt;
+					if (next <= STOP_SPEED) {
+						ball.rigidbody.setLinvel(new Vector3(0, v.y, 0), true);
+						ball.rigidbody.setAngvel(new Vector3(0, 0, 0), true);
+					} else {
+						const f = next / speed;
+						ball.rigidbody.setLinvel(new Vector3(v.x * f, v.y, v.z * f), true);
+						// 굴림 각속도도 같은 비율로 줄여 v = ω×R 굴림 조건을 유지
+						const w = ball.rigidbody.angvel();
+						ball.rigidbody.setAngvel(
+							new Vector3(w.x * f, w.y * f, w.z * f),
+							true,
+						);
+					}
+				}
 
 				return {
 					cueBall: {
