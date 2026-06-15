@@ -182,7 +182,7 @@ class Simulator {
 		angle: number,
 		power: number,
 		hitPoint: Vector2<"unit">,
-	): [TableSnapshot, () => TableSnapshot] {
+	): [TableSnapshot, StepFn] {
 		if (objectBallPositions.length > this.objectBalls.length) {
 			logger.warn("Too many balls");
 		}

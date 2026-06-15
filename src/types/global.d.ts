@@ -93,6 +93,11 @@ declare global {
 	};
 
 	/**
+	 * 테이블의 다음 스냅샷을 생성하는 함수
+	 */
+	type StepFn = () => TableSnapshot;
+
+	/**
 	 * 단일 공의 궤적 정보
 	 */
 	type BallTrajectory = {
