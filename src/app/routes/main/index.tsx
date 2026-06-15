@@ -1227,8 +1227,6 @@ function Main() {
 					columnGap: "1em",
 				}}
 			>
-				<span>Overlay FPS:</span>
-				<span></span>
 				<span>Delay:</span>
 				<span>{processingDelay?.toFixed(2)} ms</span>
 			</div>
